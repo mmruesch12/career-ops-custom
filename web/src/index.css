@@ -1,0 +1,117 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-overlay/40;
+  }
+
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply bg-crust font-sans text-text antialiased;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(137, 180, 250, 0.12), transparent),
+      radial-gradient(ellipse 60% 40% at 100% 0%, rgba(203, 166, 247, 0.08), transparent);
+    min-height: 100vh;
+  }
+
+  ::selection {
+    @apply bg-blue/30 text-text;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-mantle;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-overlay;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply rounded-2xl border border-overlay/50 bg-base/80 backdrop-blur-xl shadow-card;
+  }
+
+  .metric-card {
+    @apply glass-panel p-4 transition-all duration-200 hover:border-blue/30 hover:shadow-glow;
+  }
+
+  .tab-pill {
+    @apply rounded-full px-4 py-1.5 text-sm font-medium transition-all duration-200;
+  }
+
+  .tab-pill-active {
+    @apply bg-blue/15 text-blue ring-1 ring-blue/30;
+  }
+
+  .tab-pill-inactive {
+    @apply text-subtle hover:bg-surface/60 hover:text-text;
+  }
+
+  .prose-career {
+    @apply text-sm leading-relaxed text-subtle;
+  }
+
+  .prose-career h1 {
+    @apply mb-4 font-display text-xl font-bold text-text;
+  }
+
+  .prose-career h2 {
+    @apply mb-3 mt-6 font-display text-lg font-semibold text-text;
+  }
+
+  .prose-career h3 {
+    @apply mb-2 mt-4 font-display text-base font-semibold text-text;
+  }
+
+  .prose-career p {
+    @apply mb-3;
+  }
+
+  .prose-career strong {
+    @apply font-semibold text-text;
+  }
+
+  .prose-career table {
+    @apply mb-4 w-full border-collapse text-xs;
+  }
+
+  .prose-career th {
+    @apply border border-overlay/50 bg-surface/60 px-3 py-2 text-left font-medium text-text;
+  }
+
+  .prose-career td {
+    @apply border border-overlay/40 px-3 py-2;
+  }
+
+  .prose-career hr {
+    @apply my-6 border-overlay/50;
+  }
+
+  .prose-career ul,
+  .prose-career ol {
+    @apply mb-3 ml-4 list-disc space-y-1;
+  }
+
+  .prose-career code {
+    @apply rounded bg-surface px-1 py-0.5 text-xs text-blue;
+  }
+
+  .prose-career a {
+    @apply text-blue hover:underline;
+  }
+}

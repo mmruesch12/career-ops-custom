@@ -24,6 +24,8 @@
     "tracker": "node tracker.mjs",
     "patterns": "node analyze-patterns.mjs",
     "gemini:eval": "node gemini-eval.mjs",
+    "web": "npm run dev --prefix web",
+    "web:build": "npm run build --prefix web",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps"
   },
   "keywords": [
