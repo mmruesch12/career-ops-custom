@@ -63,11 +63,28 @@ export async function withScriptLock(fn) {
 /**
  * Scripts that read-modify-write tracker files (applications.md) must hold
  * both locks to prevent racing with status/notes PATCH.
- * Acquires script lock first, then file mutation lock.
+ * Acquires both locks in one step (no nested withScriptLock → withFileMutationLock).
  * @param {() => Promise<unknown>} fn
  */
 export async function withTrackerScriptLock(fn) {
-  return withScriptLock(() => withFileMutationLock(fn));
+  if (scriptInProgress) {
+    const err = new Error('Another script is already running. Try again shortly.');
+    err.statusCode = 409;
+    throw err;
+  }
+  if (fileMutationInProgress) {
+    const err = new Error('Another file operation is in progress. Try again shortly.');
+    err.statusCode = 409;
+    throw err;
+  }
+  scriptInProgress = true;
+  fileMutationInProgress = true;
+  try {
+    return await fn();
+  } finally {
+    fileMutationInProgress = false;
+    scriptInProgress = false;
+  }
 }
 
 /** @deprecated Use withFileMutationLock or withScriptLock */

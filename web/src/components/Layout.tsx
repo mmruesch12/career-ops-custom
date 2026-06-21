@@ -5,6 +5,7 @@ import {
   Inbox,
   Radar,
   RefreshCw,
+  Sparkles,
   Terminal,
   TrendingDown,
   User,
@@ -13,6 +14,7 @@ import type { ReactNode } from 'react';
 import type { AppView } from '../lib/types';
 
 const NAV_ITEMS: { id: AppView; label: string; icon: typeof Briefcase }[] = [
+  { id: 'matches', label: 'Matches', icon: Sparkles },
   { id: 'pipeline', label: 'Pipeline', icon: Briefcase },
   { id: 'progress', label: 'Progress', icon: BarChart2 },
   { id: 'inbox', label: 'Inbox', icon: Inbox },

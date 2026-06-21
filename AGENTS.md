@@ -18,7 +18,7 @@ There are two layers. Read `DATA_CONTRACT.md` for the full list.
 
 **System Layer (auto-updatable, DON'T put user data here):**
 - `modes/_shared.md`, `modes/oferta.md`, all other modes
-- `AGENTS.md`, `CLAUDE.md`, `OPENCODE.md`, `*.mjs` scripts, `dashboard/*`, `templates/*`, `batch/*`
+- `AGENTS.md`, `CLAUDE.md`, `OPENCODE.md`, `*.mjs` scripts, `dashboard/*`, `web/*`, `templates/*`, `batch/*`
 
 **THE RULE: When the user asks to customize anything (archetypes, narrative, negotiation scripts, proof points, location policy, comp targets), ALWAYS write to `modes/_profile.md` or `config/profile.yml`. NEVER edit `modes/_shared.md` for user-specific content.** This ensures system updates don't overwrite their customizations.
 
@@ -68,6 +68,61 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `check-liveness.mjs` | Job posting liveness checker |
 | `liveness-core.mjs` | Shared liveness logic (expired signals win over generic Apply text) |
 | `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy). Header includes `**Legitimacy:** {tier}`. |
+| `web/` | React web dashboard + Express API (`web/server/`). Reads/writes the same user-layer files as the CLI. |
+
+### Web Dashboard (`web/`)
+
+Browser UI for tracker, reports, inbox, scan history, **Matches** (daily strong-fit roles + one-click tailored resume PDF), and maintenance scripts. **Most AI workflows stay in the CLI** (evaluate JD/URL, apply assistant, cover letters, interview-prep generation); tailored resume generation is also available from Matches when `cv.md` and `XAI_API_KEY` are set.
+
+#### Setup — two `npm install`s (do not skip either)
+
+| Location | Command | Powers |
+|----------|---------|--------|
+| **Repo root** | `npm install` | Root `*.mjs` scripts: `scan.mjs`, `analyze-patterns.mjs`, `followup-cadence.mjs`, `generate-pdf.mjs`, `generate-tailored-resume.mjs`, Playwright/Chromium |
+| **`web/`** | `npm install --prefix web` | React frontend + Express API server only |
+
+Installing only `web/` leaves Scan, Patterns, Follow-ups, and PDF actions broken (`ERR_MODULE_NOT_FOUND` from root scripts). Installing only the root leaves the UI unable to start.
+
+Same onboarding prerequisites as the CLI: `cv.md` (or `data/cv.md`), `config/profile.yml`, `portals.yml` (see First Run below). Tracker/report views work with sample data even before onboarding; Profile and Scan need those files for full use.
+
+#### Run
+
+```bash
+npm run web              # from repo root — starts API + Vite together
+# equivalent: cd web && npm run dev
+```
+
+- **UI:** http://localhost:5173
+- **API:** http://127.0.0.1:3847 (Vite proxies `/api` → API)
+
+Optional remote/auth: set `API_TOKEN` on the server and matching `VITE_API_TOKEN` in the frontend env. Mutation endpoints (status, notes, inbox, scan) require the bearer token when `API_TOKEN` is set.
+
+#### What the UI does vs CLI
+
+| In the UI | CLI-only |
+|-----------|----------|
+| **Matches** — strong evaluated roles (score ≥ `matching.min_score`, default 4.0), recent scan discoveries, one-click tailored resume PDF | Evaluate JD/URL (`/career-ops {url}`), apply assistant, cover letter |
+| Pipeline — filter/sort applications, open reports, update status & notes | |
+| Progress — charts/metrics from tracker | LinkedIn outreach, deep research, interview-prep **generation** |
+| Inbox — add/remove `data/pipeline.md` URLs | Batch processing, LaTeX export |
+| Follow-ups, Patterns — via root scripts | Tailored CV HTML (required before UI PDF works) |
+| Scan — runs `scan.mjs`, shows `data/scan-history.tsv` | |
+| Profile — edit/save `cv.md` or `data/cv.md` (PUT `/api/cv`, up to 256 KB; Express body limit 300 KB) + read `config/profile.yml` | `/career-ops interview` onboarding |
+| Commands — verify, normalize, dedup buttons; AI modes as copy-paste CLI hints | |
+
+**PDF in the UI:** `POST /api/actions/resume/:reportNumber` runs `generate-tailored-resume.mjs` (xAI Grok + `cv.md`/`data/cv.md` → HTML → PDF; requires `XAI_API_KEY` in `.env`). Preflight checks run before spawning the script. `POST /api/actions/pdf/:reportNumber` compiles pre-existing HTML with `generate-pdf.mjs` (CLI `/career-ops pdf` flow).
+
+**Not wired in UI yet** (API may exist): interview-prep browser, portals editor, `merge-tracker` / `reconcile-pipeline` buttons.
+
+#### Agent troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| User asks to "serve" / "open dashboard" | Run both installs if needed, then `npm run web` |
+| Follow-ups/Patterns/Scan API errors with `MODULE_NOT_FOUND` | `npm install` at **repo root** |
+| Profile tab shows "Setup Required" | Complete onboarding (`cv.md`, `config/profile.yml`, `portals.yml`) |
+| Scan returns little or errors | Ensure `portals.yml` exists (not just `templates/portals.example.yml`) |
+| PDF / resume action fails | Set `XAI_API_KEY` in `.env`, ensure `cv.md` exists; for legacy flow generate HTML via CLI first; root `npm install` for Playwright |
 
 ### First Run — Onboarding (IMPORTANT)
 
@@ -143,6 +198,7 @@ Once all files exist, confirm:
 > - Paste a job URL to evaluate it
 > - Run `/career-ops scan` (or `/career-ops-scan` if using OpenCode) to search portals
 > - Run `/career-ops` to see all commands
+> - Open the web dashboard: `npm run web` → http://localhost:5173 (run `npm install` at repo root and in `web/` first if you haven't)
 >
 > Everything is customizable — just ask me to change anything.
 >
@@ -223,6 +279,7 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 | Asks about rejection patterns or wants to improve targeting | `patterns` |
 | Asks about follow-ups or application cadence | `followup` |
 | Wants to update the system | `update` |
+| Wants the web dashboard / "serve the app" | start `web/` (see Web Dashboard section) |
 
 ### CV Source of Truth
 
@@ -285,7 +342,7 @@ When spawning headless workers for batch processing, use the appropriate command
 
 ## Stack and Conventions
 
-- Node.js (mjs modules), Playwright (PDF + scraping), YAML (config), HTML/CSS (template), Markdown (data), Canva MCP (optional visual CV)
+- Node.js (mjs modules), Playwright (PDF + scraping), YAML (config), HTML/CSS (template), Markdown (data), React/Vite web dashboard (`web/`), Canva MCP (optional visual CV)
 - Scripts in `.mjs`, configuration in YAML
 - Output in `output/` (gitignored), Reports in `reports/`
 - JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md)

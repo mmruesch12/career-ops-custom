@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
 import { deriveNoteFields } from './derive.mjs';
 import { acquireTrackerLock } from './tracker-lock.mjs';
+import { resolveCvAbsolutePath, resolveCvRelativePath, cvFileExists } from '../../cv-path.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS_ROOT = resolve(__dirname, '../..');
@@ -644,11 +645,6 @@ export function loadProfile(careerOpsPath = CAREER_OPS_ROOT) {
     join(careerOpsPath, 'config', 'profile.yml'),
     join(careerOpsPath, 'profile.yml'),
   ];
-  const cvPaths = [
-    join(careerOpsPath, 'cv.md'),
-    join(careerOpsPath, 'data', 'cv.md'),
-  ];
-
   let profilePath = '';
   let profileContent = '';
   let profile = null;
@@ -667,12 +663,10 @@ export function loadProfile(careerOpsPath = CAREER_OPS_ROOT) {
 
   let cvPath = '';
   let cvContent = '';
-  for (const p of cvPaths) {
-    if (existsSync(p)) {
-      cvPath = relative(careerOpsPath, p);
-      cvContent = readFileSync(p, 'utf-8');
-      break;
-    }
+  if (cvFileExists(careerOpsPath)) {
+    const cvAbs = resolveCvAbsolutePath(careerOpsPath);
+    cvPath = relative(careerOpsPath, cvAbs);
+    cvContent = readFileSync(cvAbs, 'utf-8');
   }
 
   return {
@@ -754,6 +748,210 @@ export function validateHtmlSource(careerOpsPath, htmlPath) {
     if (resolved === root || resolved.startsWith(root + sep)) return resolved;
   }
   throw new Error('HTML source must be under output/ or /tmp');
+}
+
+const DEFAULT_MATCH_MIN_SCORE = 4.0;
+const DISCOVERY_LOOKBACK_DAYS = 14;
+const MAX_CV_BYTES = 256 * 1024;
+
+function loadMatchMinScore(careerOpsPath = CAREER_OPS_ROOT) {
+  const profilePaths = [
+    join(careerOpsPath, 'config', 'profile.yml'),
+    join(careerOpsPath, 'profile.yml'),
+  ];
+  for (const p of profilePaths) {
+    if (!existsSync(p)) continue;
+    try {
+      const doc = yaml.load(readFileSync(p, 'utf-8'));
+      const raw = doc?.matching?.min_score ?? doc?.matching?.minScore;
+      const n = Number(raw);
+      if (Number.isFinite(n) && n >= 0 && n <= 5) return n;
+    } catch {
+      // fall through to default
+    }
+  }
+  return DEFAULT_MATCH_MIN_SCORE;
+}
+
+function normalizeMatchUrl(url) {
+  if (!url) return '';
+  try {
+    const u = new URL(String(url).trim());
+    return `${u.origin}${u.pathname}`.replace(/\/$/, '').toLowerCase();
+  } catch {
+    return String(url).trim().replace(/\/$/, '').toLowerCase();
+  }
+}
+
+function daysAgoIso(days) {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().split('T')[0];
+}
+
+function normalizeCompanyRoleKey(company, role) {
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return `${norm(company)}::${norm(role)}`;
+}
+
+export function getResumePrerequisites(careerOpsPath = CAREER_OPS_ROOT) {
+  const cvPath = cvFileExists(careerOpsPath) ? resolveCvRelativePath(careerOpsPath) : null;
+  let hasCv = false;
+  if (cvPath) {
+    const content = readFileSync(join(careerOpsPath, cvPath), 'utf-8').trim();
+    hasCv = content.length > 0;
+  }
+  const hasXaiKey = Boolean(process.env.XAI_API_KEY?.trim());
+  return {
+    hasCv,
+    hasXaiKey,
+    cvPath,
+    canGenerateResume: hasCv && hasXaiKey,
+  };
+}
+
+export function computeMatches(careerOpsPath = CAREER_OPS_ROOT) {
+  const minScore = loadMatchMinScore(careerOpsPath);
+  const apps = enrichApplications(parseApplications(careerOpsPath), careerOpsPath);
+
+  const evaluatedMatches = apps
+    .filter((app) => {
+      if (normalizeStatus(app.status) !== 'evaluated' || app.score < minScore) return false;
+      if (!app.reportNumber || !app.reportPath) return false;
+      return existsSync(join(careerOpsPath, app.reportPath));
+    })
+    .sort((a, b) => b.date.localeCompare(a.date) || b.score - a.score)
+    .map((app) => ({
+      reportNumber: app.reportNumber,
+      number: app.number,
+      date: app.date,
+      company: app.company,
+      role: app.role,
+      score: app.score,
+      scoreRaw: app.scoreRaw,
+      tldr: app.tldr,
+      archetype: app.archetype,
+      jobURL: app.jobURL,
+      hasPDF: app.hasPDF,
+      pdfPath: app.pdfPath || '',
+      reportPath: app.reportPath,
+      remote: app.remote,
+      compEstimate: app.compEstimate,
+    }));
+
+  const knownUrls = new Set();
+  const knownCompanyRoles = new Set();
+  for (const app of apps) {
+    const normalized = normalizeMatchUrl(app.jobURL);
+    if (normalized) knownUrls.add(normalized);
+    const cr = normalizeCompanyRoleKey(app.company, app.role);
+    if (cr !== '::') knownCompanyRoles.add(cr);
+  }
+
+  const pipeline = loadPipeline(careerOpsPath);
+  for (const item of pipeline.pending) {
+    const normalized = normalizeMatchUrl(item.url);
+    if (normalized) knownUrls.add(normalized);
+  }
+
+  const cutoff = daysAgoIso(DISCOVERY_LOOKBACK_DAYS);
+  const scan = loadScanHistory(careerOpsPath);
+  const recentDiscoveries = scan.entries
+    .filter((entry) => entry.firstSeen && entry.firstSeen >= cutoff)
+    .filter((entry) => {
+      const normalized = normalizeMatchUrl(entry.url);
+      if (normalized && knownUrls.has(normalized)) return false;
+      const cr = normalizeCompanyRoleKey(entry.company, entry.title);
+      if (cr !== '::' && knownCompanyRoles.has(cr)) return false;
+      if (entry.status && /evaluated|applied|duplicate/i.test(entry.status)) return false;
+      return true;
+    })
+    .map((entry) => ({
+      title: entry.title,
+      company: entry.company,
+      url: entry.url,
+      firstSeen: entry.firstSeen,
+      portal: entry.portal,
+      location: entry.location,
+      status: entry.status,
+    }));
+
+  return {
+    minScore,
+    evaluatedMatches,
+    recentDiscoveries,
+    prerequisites: getResumePrerequisites(careerOpsPath),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+export function saveCv(careerOpsPath, content) {
+  if (typeof content !== 'string') {
+    throw new Error('content must be a string');
+  }
+  if (!content.trim()) {
+    throw new Error('CV content cannot be empty');
+  }
+  if (Buffer.byteLength(content, 'utf8') > MAX_CV_BYTES) {
+    throw new Error(`CV exceeds maximum size of ${MAX_CV_BYTES} bytes`);
+  }
+
+  const target = resolveCvAbsolutePath(careerOpsPath);
+  assertInsideRepo(careerOpsPath, target);
+  if (existsSync(target)) {
+    copyFileSync(target, `${target}.bak`);
+  }
+  writeFileSync(target, content, 'utf-8');
+  return { path: relative(careerOpsPath, target), bytes: Buffer.byteLength(content, 'utf8') };
+}
+
+export function updateReportPdfPath(careerOpsPath, reportPath, pdfFilename) {
+  if (!reportPath || !pdfFilename) return false;
+  const fullPath = join(careerOpsPath, reportPath);
+  assertInsideRepo(careerOpsPath, fullPath);
+  if (!existsSync(fullPath)) return false;
+
+  const safeName = basename(String(pdfFilename));
+  if (!safeName.endsWith('.pdf') || safeName.includes('..')) return false;
+
+  const pdfLine = `**PDF:** output/${safeName}`;
+  let content = readFileSync(fullPath, 'utf-8');
+  if (reReportPDF.test(content)) {
+    content = content.replace(reReportPDF, pdfLine);
+  } else {
+    const headerEnd = content.indexOf('\n---\n');
+    const insertAt = headerEnd > 0 ? headerEnd : content.length;
+    const prefix = content.slice(0, insertAt).trimEnd();
+    const suffix = content.slice(insertAt);
+    content = `${prefix}\n${pdfLine}${suffix.startsWith('\n') ? '' : '\n'}${suffix}`;
+  }
+  writeFileSync(fullPath, content, 'utf-8');
+  return true;
+}
+
+export async function updateApplicationPdf(careerOpsPath, reportNumber, pdfEmoji = '✅') {
+  return withTrackerWrite(careerOpsPath, (filePath) => {
+    const lines = readFileSync(filePath, 'utf-8').split('\n');
+    const colmap = detectColumns(lines) || LEGACY_COLMAP;
+    if (colmap.pdf == null) throw new Error('Tracker has no PDF column');
+    let found = false;
+
+    const updated = lines.map((line) => {
+      if (!line.trim().startsWith('|') || line.includes('---')) return line;
+      const parts = line.split('|').map((s) => s.trim());
+      const maxIdx = Math.max(...Object.values(colmap));
+      if (parts.length <= maxIdx) return line;
+      if (reportNumberFromCell(parts[colmap.report]) !== String(reportNumber)) return line;
+
+      parts[colmap.pdf] = pdfEmoji;
+      found = true;
+      return `| ${parts.slice(1, -1).join(' | ')} |`;
+    });
+
+    if (!found) throw new Error(`Application with report ${reportNumber} not found`);
+    writeTrackerFile(filePath, updated.join('\n'));
+    return true;
+  });
 }
 
 export function findHtmlForPdf(careerOpsPath, pdfPath, reportPath) {

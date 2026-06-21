@@ -1,4 +1,5 @@
 export type AppView =
+  | 'matches'
   | 'pipeline'
   | 'progress'
   | 'inbox'
@@ -225,6 +226,61 @@ export interface PortalsData {
   content: string;
   parsed: Record<string, unknown> | null;
   exists: boolean;
+}
+
+export interface EvaluatedMatch {
+  reportNumber: string;
+  number: number;
+  date: string;
+  company: string;
+  role: string;
+  score: number;
+  scoreRaw: string;
+  tldr: string;
+  archetype: string;
+  jobURL: string;
+  hasPDF: boolean;
+  pdfPath: string;
+  reportPath: string;
+  remote: string;
+  compEstimate: string;
+}
+
+export interface RecentDiscovery {
+  title: string;
+  company: string;
+  url: string;
+  firstSeen: string;
+  portal: string;
+  location: string;
+  status: string;
+}
+
+export interface ResumePrerequisites {
+  hasCv: boolean;
+  hasXaiKey: boolean;
+  cvPath: string | null;
+  canGenerateResume: boolean;
+}
+
+export interface MatchData {
+  minScore: number;
+  evaluatedMatches: EvaluatedMatch[];
+  recentDiscoveries: RecentDiscovery[];
+  prerequisites: ResumePrerequisites;
+  generatedAt: string;
+}
+
+export interface ResumeGenerationResult {
+  ok: boolean;
+  pdfFilename?: string;
+  downloadUrl?: string;
+  company?: string;
+  role?: string;
+  trackerUpdated?: boolean;
+  reportUpdated?: boolean;
+  error?: string;
+  hint?: string;
 }
 
 export interface CommandCard {

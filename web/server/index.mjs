@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { existsSync } from 'fs';
-import { basename } from 'path';
+import { basename, join } from 'path';
 import {
   parseApplications,
   enrichApplications,
@@ -26,8 +26,13 @@ import {
   findHtmlForPdf,
   validateStatusValue,
   getCareerOpsRoot,
+  computeMatches,
+  saveCv,
+  updateApplicationPdf,
+  updateReportPdfPath,
+  getResumePrerequisites,
 } from './data-service.mjs';
-import { runScript, runScriptJSON } from './scripts-runner.mjs';
+import { runScript, runScriptJSON, runScriptJSONOk } from './scripts-runner.mjs';
 import {
   assertNoScriptRunning,
   withFileMutationLock,
@@ -45,6 +50,13 @@ const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://
   .filter(Boolean);
 const ROOT = getCareerOpsRoot();
 
+try {
+  const { config } = await import('dotenv');
+  config({ path: join(ROOT, '.env'), quiet: true });
+} catch {
+  // dotenv optional
+}
+
 const actionRateLimits = new Map();
 const ACTION_RATE_WINDOW_MS = 60_000;
 const ACTION_RATE_MAX = 10;
@@ -58,7 +70,10 @@ app.use(cors({
     }
   },
 }));
-app.use(express.json({ limit: '64kb' }));
+app.use((req, res, next) => {
+  const limit = req.method === 'PUT' && req.path === '/api/cv' ? '300kb' : '64kb';
+  return express.json({ limit })(req, res, next);
+});
 
 function validateReportNumber(reportNumber) {
   if (!/^\d+$/.test(String(reportNumber))) {
@@ -219,6 +234,24 @@ app.get('/api/profile', (_req, res) => {
   res.json(loadProfile(ROOT));
 });
 
+app.get('/api/matches', (_req, res) => {
+  res.json(computeMatches(ROOT));
+});
+
+app.put('/api/cv', mutationMiddleware, async (req, res) => {
+  const { content } = req.body;
+  if (content === undefined || content === null) {
+    return res.status(400).json({ error: 'content required (string)' });
+  }
+  try {
+    assertNoScriptRunning('A script is running. CV save is disabled until it finishes.');
+    const result = await withFileMutationLock(() => Promise.resolve(saveCv(ROOT, content)));
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
 app.get('/api/followups', async (_req, res) => {
   try {
     const { data, exitCode, stderr } = await runScriptJSON('followup-cadence.mjs');
@@ -299,6 +332,78 @@ app.post('/api/actions/scan', mutationMiddleware, async (_req, res) => {
     res.json(result);
   } catch (err) {
     scriptError(res, err, err.statusCode || 500);
+  }
+});
+
+app.post('/api/actions/resume/:reportNumber', mutationMiddleware, async (req, res) => {
+  try {
+    validateReportNumber(req.params.reportNumber);
+
+    const prereqs = getResumePrerequisites(ROOT);
+    if (!prereqs.hasCv) {
+      return res.status(400).json({
+        ok: false,
+        error: 'cv.md not found. Create your default resume in Profile first.',
+      });
+    }
+    if (!prereqs.hasXaiKey) {
+      return res.status(400).json({
+        ok: false,
+        error: 'XAI_API_KEY not found. Add it to .env at the repo root.',
+      });
+    }
+
+    const result = await withTrackerScriptLock(async () => {
+      const apps = getApps();
+      const application = apps.find((a) => a.reportNumber === req.params.reportNumber);
+      if (!application?.reportPath) {
+        const err = new Error('Application not found');
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const scriptResult = await runScriptJSONOk(
+        'generate-tailored-resume.mjs',
+        ['--report', req.params.reportNumber],
+        { timeout: 180_000 },
+      );
+
+      const { pdfFilename, company, role } = scriptResult.data;
+      let trackerUpdated = false;
+      let reportUpdated = false;
+      try {
+        await updateApplicationPdf(ROOT, req.params.reportNumber, '✅');
+        trackerUpdated = true;
+      } catch (err) {
+        console.warn(
+          `Tracker PDF update failed for report ${req.params.reportNumber}:`,
+          err.message,
+        );
+      }
+      try {
+        reportUpdated = updateReportPdfPath(ROOT, application.reportPath, pdfFilename);
+      } catch (err) {
+        console.warn(
+          `Report PDF header update failed for report ${req.params.reportNumber}:`,
+          err.message,
+        );
+      }
+
+      return {
+        ok: true,
+        pdfFilename,
+        downloadUrl: `/api/output/${encodeURIComponent(pdfFilename)}`,
+        company,
+        role,
+        trackerUpdated,
+        reportUpdated,
+      };
+    });
+    res.json(result);
+  } catch (err) {
+    const payload = { ok: false, error: err.message };
+    if (err.hint) payload.hint = err.hint;
+    res.status(err.statusCode || 500).json(payload);
   }
 });
 

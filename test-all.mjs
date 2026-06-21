@@ -3962,6 +3962,168 @@ try {
   fail(`ibm provider tests crashed: ${e.message}`);
 }
 
+console.log('\n25. Web dashboard — matches + tailored resume');
+
+try {
+  const scriptsRunner = readFile('web/server/scripts-runner.mjs');
+  if (scriptsRunner.includes("'generate-tailored-resume.mjs'") && scriptsRunner.includes('runScriptJSONOk')) {
+    pass('scripts-runner allowlist + runScriptJSONOk helper present');
+  } else {
+    fail('scripts-runner missing generate-tailored-resume.mjs or runScriptJSONOk');
+  }
+
+  const serverIndex = readFile('web/server/index.mjs');
+  if (
+    serverIndex.includes("app.get('/api/matches'")
+    && serverIndex.includes("'300kb'")
+    && serverIndex.includes('getResumePrerequisites')
+    && serverIndex.includes('runScriptJSONOk')
+  ) {
+    pass('web server exposes matches/cv/resume with preflight + 300kb CV body limit');
+  } else {
+    fail('web server missing matches/cv/resume enhancements');
+  }
+
+  const mutexSrc = readFile('web/server/mutex.mjs');
+  if (mutexSrc.includes('fileMutationInProgress = true') && !mutexSrc.includes('withScriptLock(() => withFileMutationLock')) {
+    pass('withTrackerScriptLock acquires both locks without nested deadlock');
+  } else {
+    fail('mutex.mjs still uses nested withScriptLock → withFileMutationLock');
+  }
+
+  const genResumeSyntax = run(NODE, ['--check', 'generate-tailored-resume.mjs']);
+  if (genResumeSyntax !== null) pass('generate-tailored-resume.mjs syntax OK');
+  else fail('generate-tailored-resume.mjs has syntax errors');
+
+  const {
+    computeMatches,
+    saveCv,
+    getResumePrerequisites,
+  } = await import(pathToFileURL(join(ROOT, 'web/server/data-service.mjs')).href);
+  const { resolveCvRelativePath } = await import(pathToFileURL(join(ROOT, 'cv-path.mjs')).href);
+
+  const matches = computeMatches(ROOT);
+  if (
+    typeof matches.minScore === 'number'
+    && Array.isArray(matches.evaluatedMatches)
+    && Array.isArray(matches.recentDiscoveries)
+    && matches.prerequisites
+  ) {
+    pass(`computeMatches() shape OK (minScore=${matches.minScore}, matches=${matches.evaluatedMatches.length})`);
+  } else {
+    fail(`computeMatches() unexpected shape: ${JSON.stringify(matches)}`);
+  }
+
+  const evaluatedOnly = matches.evaluatedMatches.every((m) => m.score >= matches.minScore && m.reportNumber && m.reportPath);
+  if (evaluatedOnly) pass('computeMatches evaluatedMatches respect minScore + report fields');
+  else fail('computeMatches evaluatedMatches includes invalid entries');
+
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-matches-'));
+  try {
+    mkdirSync(join(fixtureRoot, 'data'));
+    mkdirSync(join(fixtureRoot, 'reports'));
+    writeFileSync(join(fixtureRoot, 'data', 'applications.md'), `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Acme | ML Engineer | 4.5/5 | Evaluated | ❌ | [001](reports/001-acme-ml.md) | Strong fit |
+| 2 | 2026-06-02 | BetaCo | Staff AI | 4.8/5 | Applied | ❌ | [002](reports/002-betaco-staff.md) | Applied already |
+| 3 | 2026-06-03 | Gamma | Data Lead | 4.2/5 | Evaluated | ❌ | [003](reports/003-gamma-missing.md) | Missing report file |
+`);
+    writeFileSync(join(fixtureRoot, 'reports', '001-acme-ml.md'), '# Evaluation: Acme — ML Engineer\n\n**Score:** 4.5/5\n');
+    writeFileSync(join(fixtureRoot, 'reports', '002-betaco-staff.md'), '# Evaluation: BetaCo — Staff AI\n\n**Score:** 4.8/5\n');
+    writeFileSync(join(fixtureRoot, 'data', 'scan-history.tsv'), [
+      'url\tfirstSeen\tportal\ttitle\tcompany\tstatus\tlocation',
+      'https://jobs.example.com/acme-ml\t2026-06-10\tgreenhouse\tML Engineer\tAcme\tevaluated\tRemote',
+      'https://jobs.example.com/newco-sre\t2026-06-11\tlever\tSRE\tNewCo\t\tRemote',
+      'https://jobs.example.com/betaco-staff\t2026-06-12\tashby\tStaff AI\tBetaCo\tapplied\tRemote',
+    ].join('\n') + '\n');
+
+    const fixtureMatches = computeMatches(fixtureRoot);
+    const companies = fixtureMatches.evaluatedMatches.map((m) => m.company);
+    if (companies.includes('Acme') && !companies.includes('BetaCo') && !companies.includes('Gamma')) {
+      pass('computeMatches fixture excludes Applied high-score and missing report file');
+    } else {
+      fail(`computeMatches fixture evaluated filter wrong: ${JSON.stringify(companies)}`);
+    }
+
+    const discoveryUrls = fixtureMatches.recentDiscoveries.map((d) => d.url);
+    if (discoveryUrls.includes('https://jobs.example.com/newco-sre') && !discoveryUrls.some((u) => u.includes('acme') || u.includes('betaco'))) {
+      pass('computeMatches fixture dedups discoveries by URL and company+role');
+    } else {
+      fail(`computeMatches fixture discoveries wrong: ${JSON.stringify(discoveryUrls)}`);
+    }
+
+    writeFileSync(join(fixtureRoot, 'data', 'cv.md'), '# Test CV\n\n### Acme Corp\nBuilt ML pipelines with Python and Kubernetes.\n');
+    const saved = saveCv(fixtureRoot, '# Updated CV\n\n### Acme Corp\nStill real experience.\n');
+    if (saved.path === 'data/cv.md' && existsSync(join(fixtureRoot, 'data', 'cv.md.bak'))) {
+      pass('saveCv fixture writes data/cv.md with backup');
+    } else {
+      fail(`saveCv fixture unexpected: ${JSON.stringify(saved)}`);
+    }
+
+    let emptyCvErr = false;
+    try { saveCv(fixtureRoot, '   '); } catch { emptyCvErr = true; }
+    if (emptyCvErr) pass('saveCv rejects empty/whitespace content');
+    else fail('saveCv should reject empty content');
+
+    const prereqs = getResumePrerequisites(fixtureRoot);
+    if (prereqs.hasCv && prereqs.cvPath === 'data/cv.md') {
+      pass('getResumePrerequisites detects data/cv.md');
+    } else {
+      fail(`getResumePrerequisites fixture: ${JSON.stringify(prereqs)}`);
+    }
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+
+  if (resolveCvRelativePath(ROOT) === 'cv.md' || resolveCvRelativePath(ROOT) === 'data/cv.md') {
+    pass('cv-path.mjs resolves relative CV path');
+  } else {
+    fail(`cv-path resolveCvRelativePath unexpected: ${resolveCvRelativePath(ROOT)}`);
+  }
+
+  let noXaiOut = '';
+  try {
+    execFileSync(NODE, ['generate-tailored-resume.mjs', '--report', '1'], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      env: { ...process.env, XAI_API_KEY: '' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    noXaiOut = (err.stdout || '').trim();
+  }
+  if (noXaiOut.includes('"ok":false') && noXaiOut.includes('XAI_API_KEY')) {
+    pass('generate-tailored-resume.mjs fails clearly without XAI_API_KEY');
+  } else {
+    fail(`generate-tailored-resume.mjs missing-key output unexpected: ${noXaiOut}`);
+  }
+
+  if (!fileExists('cv.md') && !fileExists('data/cv.md')) {
+    let noCvOut = '';
+    try {
+      execFileSync(NODE, ['generate-tailored-resume.mjs', '--report', '4'], {
+        cwd: ROOT,
+        encoding: 'utf-8',
+        env: { ...process.env, XAI_API_KEY: 'test-key' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (err) {
+      noCvOut = (err.stdout || '').trim();
+    }
+    if (noCvOut.includes('"ok":false') && noCvOut.includes('cv.md')) {
+      pass('generate-tailored-resume.mjs fails clearly without cv.md');
+    } else {
+      fail(`generate-tailored-resume.mjs missing cv output unexpected: ${noCvOut}`);
+    }
+  } else {
+    warn('cv.md present in repo — skipped missing-cv CLI test');
+  }
+} catch (e) {
+  fail(`web matches tests crashed: ${e.message}`);
+}
+
 // ── SUMMARY ─────────────────────────────────────────────────────
 
 console.log('\n' + '='.repeat(50));

@@ -6,6 +6,7 @@ import { FilterTabs } from './components/FilterTabs';
 import { FollowupsView } from './components/FollowupsView';
 import { InboxView } from './components/InboxView';
 import { Layout } from './components/Layout';
+import { MatchesView } from './components/MatchesView';
 import { MetricsBar } from './components/MetricsBar';
 import { PatternsView } from './components/PatternsView';
 import { ProfileView } from './components/ProfileView';
@@ -16,6 +17,7 @@ import {
   fetchApplications,
   fetchDoctor,
   fetchFollowups,
+  fetchMatches,
   fetchPatterns,
   fetchPipelineInbox,
   fetchProfile,
@@ -30,6 +32,7 @@ import type {
   Application,
   DoctorData,
   FollowupsData,
+  MatchData,
   PatternsData,
   PipelineInbox,
   PipelineMetrics,
@@ -51,9 +54,10 @@ const SORT_OPTIONS: { id: SortMode; label: string }[] = [
   { id: 'last', label: 'Last Contact' },
 ];
 
-const LAZY_VIEWS: AppView[] = ['inbox', 'followups', 'patterns', 'scan', 'profile'];
+const LAZY_VIEWS: AppView[] = ['matches', 'inbox', 'followups', 'patterns', 'scan', 'profile'];
 
 async function fetchViewData(view: AppView): Promise<{
+  matches?: MatchData;
   inbox?: PipelineInbox;
   followups?: FollowupsData;
   patterns?: PatternsData;
@@ -63,6 +67,8 @@ async function fetchViewData(view: AppView): Promise<{
   doctorError?: string | null;
 }> {
   switch (view) {
+    case 'matches':
+      return { matches: await fetchMatches() };
     case 'followups':
       return { followups: await fetchFollowups() };
     case 'patterns':
@@ -102,6 +108,7 @@ function clearViewState(
   view: AppView,
   setters: {
     setInbox: (v: PipelineInbox | null) => void;
+    setMatches: (v: MatchData | null) => void;
     setFollowups: (v: FollowupsData | null) => void;
     setPatterns: (v: PatternsData | null) => void;
     setScanHistory: (v: ScanHistoryData | null) => void;
@@ -110,6 +117,7 @@ function clearViewState(
     setDoctorError: (v: string | null) => void;
   },
 ) {
+  if (view === 'matches') setters.setMatches(null);
   if (view === 'followups') setters.setFollowups(null);
   if (view === 'patterns') setters.setPatterns(null);
   if (view === 'scan') setters.setScanHistory(null);
@@ -121,7 +129,7 @@ function clearViewState(
 }
 
 export default function App() {
-  const [view, setView] = useState<AppView>('pipeline');
+  const [view, setView] = useState<AppView>('matches');
   const [filter, setFilter] = useState<StatusFilter>('all');
   const [sort, setSort] = useState<SortMode>('score');
   const [search, setSearch] = useState('');
@@ -135,6 +143,7 @@ export default function App() {
   const [reportLoading, setReportLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [matches, setMatches] = useState<MatchData | null>(null);
   const [inbox, setInbox] = useState<PipelineInbox | null>(null);
   const [followups, setFollowups] = useState<FollowupsData | null>(null);
   const [patterns, setPatterns] = useState<PatternsData | null>(null);
@@ -188,6 +197,7 @@ export default function App() {
 
     const requestId = ++viewRequestId.current;
     clearViewState(view, {
+      setMatches,
       setInbox,
       setFollowups,
       setPatterns,
@@ -202,6 +212,7 @@ export default function App() {
     fetchViewData(view)
       .then((data) => {
         if (viewRequestId.current !== requestId) return;
+        if (data.matches !== undefined) setMatches(data.matches);
         if (data.inbox !== undefined) setInbox(data.inbox);
         if (data.followups !== undefined) setFollowups(data.followups);
         if (data.patterns !== undefined) setPatterns(data.patterns);
@@ -289,6 +300,7 @@ export default function App() {
       try {
         const data = await fetchViewData(view);
         if (viewRequestId.current !== requestId) return;
+        if (data.matches !== undefined) setMatches(data.matches);
         if (data.inbox !== undefined) setInbox(data.inbox);
         if (data.followups !== undefined) setFollowups(data.followups);
         if (data.patterns !== undefined) setPatterns(data.patterns);
@@ -319,6 +331,14 @@ export default function App() {
       setScanHistory(await fetchScanHistory());
     } catch (err) {
       setViewError(err instanceof Error ? err.message : 'Failed to refresh scan history');
+    }
+  };
+
+  const refreshMatches = async () => {
+    try {
+      setMatches(await fetchMatches());
+    } catch (err) {
+      setViewError(err instanceof Error ? err.message : 'Failed to refresh matches');
     }
   };
 
@@ -363,10 +383,19 @@ export default function App() {
           {error}
         </div>
       )}
-      {viewError && LAZY_VIEWS.includes(view) && view !== 'profile' && (
+      {viewError && LAZY_VIEWS.includes(view) && view !== 'profile' && view !== 'matches' && (
         <div className="mb-6 rounded-xl border border-red/30 bg-red/10 px-4 py-3 text-sm text-red">
           {viewError}
         </div>
+      )}
+
+      {view === 'matches' && (
+        <MatchesView
+          data={matches}
+          loading={viewLoading}
+          error={viewError}
+          onRefresh={refreshMatches}
+        />
       )}
 
       {view === 'progress' && (

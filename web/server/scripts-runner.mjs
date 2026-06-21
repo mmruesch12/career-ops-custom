@@ -15,6 +15,7 @@ const ALLOWED_SCRIPTS = new Set([
   'doctor.mjs',
   'verify-pipeline.mjs',
   'generate-pdf.mjs',
+  'generate-tailored-resume.mjs',
   'normalize-statuses.mjs',
   'dedup-tracker.mjs',
   'merge-tracker.mjs',
@@ -119,17 +120,53 @@ export function runScript(script, args = [], { timeout = 120_000 } = {}) {
  * @param {string[]} args
  * @param {{ timeout?: number }} options
  */
+function parseScriptStdout(stdout) {
+  const trimmed = stdout.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const lines = trimmed.split('\n').map((l) => l.trim()).filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].startsWith('{')) continue;
+      try {
+        return JSON.parse(lines[i]);
+      } catch {
+        // try earlier line
+      }
+    }
+    throw new Error('no JSON object in stdout');
+  }
+}
+
 export async function runScriptJSON(script, args = [], options = {}) {
   const result = await runScript(script, args, options);
   if (result.exitCode !== 0 && !result.stdout) {
     throw new Error(result.stderr || `Script ${script} failed with exit code ${result.exitCode}`);
   }
   try {
-    return { data: JSON.parse(result.stdout), ...result };
+    return { data: parseScriptStdout(result.stdout), ...result };
   } catch {
     const stderrSnippet = result.stderr ? result.stderr.slice(0, 200) : '(empty)';
     throw new Error(
       `Failed to parse JSON from ${script} (exit ${result.exitCode}): ${result.stdout.slice(0, 200)} | stderr: ${stderrSnippet}`,
     );
   }
+}
+
+/**
+ * Parse JSON stdout and reject scripts that return `{ ok: false, error }`.
+ * @param {string} script
+ * @param {string[]} args
+ * @param {{ timeout?: number }} options
+ */
+export async function runScriptJSONOk(script, args = [], options = {}) {
+  const result = await runScriptJSON(script, args, options);
+  if (result.exitCode !== 0 || result.data?.ok === false) {
+    const err = new Error(result.data?.error || result.stderr || `Script ${script} failed`);
+    err.statusCode = 400;
+    err.exitCode = result.exitCode;
+    err.scriptResult = result;
+    throw err;
+  }
+  return result;
 }

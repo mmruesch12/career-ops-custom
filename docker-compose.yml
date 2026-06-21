@@ -20,6 +20,9 @@ services:
       - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
       # Forward common API keys if set on host. Empty values are ignored.
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - XAI_BASE_URL=${XAI_BASE_URL:-}
+      - XAI_MODEL=${XAI_MODEL:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     # Chromium needs a larger /dev/shm than the default 64M.

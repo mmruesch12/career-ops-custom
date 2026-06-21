@@ -3,12 +3,14 @@ import type {
   DoctorData,
   FollowupsData,
   InterviewPrepFile,
+  MatchData,
   PatternsData,
   PipelineInbox,
   PipelineMetrics,
   PortalsData,
   ProfileData,
   ProgressMetrics,
+  ResumeGenerationResult,
   ScanHistoryData,
   ScriptResult,
   SortMode,
@@ -34,8 +36,9 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, init);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    const message = typeof err.error === 'string' ? err.error : JSON.stringify(err.error ?? res.statusText);
-    throw new Error(message || 'Request failed');
+    const base = typeof err.error === 'string' ? err.error : JSON.stringify(err.error ?? res.statusText);
+    const hint = typeof err.hint === 'string' && err.hint ? ` — ${err.hint}` : '';
+    throw new Error((base || 'Request failed') + hint);
   }
   return res.json();
 }
@@ -121,6 +124,26 @@ export function fetchScanHistory() {
 
 export function fetchProfile() {
   return fetchJSON<ProfileData>('/profile');
+}
+
+export function fetchMatches() {
+  return fetchJSON<MatchData>('/matches');
+}
+
+export function saveCv(content: string) {
+  return fetchMutating<{ ok: boolean; path: string; bytes: number }>('/cv', {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  });
+}
+
+const RESUME_REQUEST_TIMEOUT_MS = 190_000;
+
+export function generateResume(reportNumber: string) {
+  return fetchMutating<ResumeGenerationResult>(`/actions/resume/${reportNumber}`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(RESUME_REQUEST_TIMEOUT_MS),
+  });
 }
 
 export function fetchPortals() {

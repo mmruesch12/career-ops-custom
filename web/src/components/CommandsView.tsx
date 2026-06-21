@@ -9,6 +9,7 @@ import {
   Inbox,
   Loader2,
   Radar,
+  Sparkles,
   Terminal,
   TrendingDown,
   User,
@@ -22,6 +23,14 @@ interface Props {
 }
 
 const COMMANDS: CommandCard[] = [
+  {
+    id: 'matches',
+    title: 'Matches',
+    description: 'Strong evaluated roles + one-click tailored resume PDF',
+    cli: 'Open Matches tab in dashboard',
+    category: 'view',
+    view: 'matches',
+  },
   {
     id: 'auto-pipeline',
     title: 'Auto-Pipeline',
@@ -195,6 +204,7 @@ const COMMANDS: CommandCard[] = [
 ];
 
 const VIEW_ICONS: Partial<Record<AppView, typeof Briefcase>> = {
+  matches: Sparkles,
   pipeline: Briefcase,
   progress: BarChart2,
   inbox: Inbox,

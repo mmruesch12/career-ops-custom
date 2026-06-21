@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { AlertCircle, FileText, Loader2, User } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AlertCircle, Check, FileText, Loader2, Save, User } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { saveCv } from '../lib/api';
 import type { DoctorData, ProfileData } from '../lib/types';
 
 interface Props {
@@ -15,6 +16,37 @@ type Tab = 'cv' | 'profile';
 
 export function ProfileView({ profile, doctor, doctorError, loading, error }: Props) {
   const [tab, setTab] = useState<Tab>('cv');
+  const [cvDraft, setCvDraft] = useState('');
+  const [cvDirty, setCvDirty] = useState(false);
+  const [cvSaving, setCvSaving] = useState(false);
+  const [cvSaveError, setCvSaveError] = useState<string | null>(null);
+  const [cvSaved, setCvSaved] = useState(false);
+
+  useEffect(() => {
+    if (profile?.cv?.content != null) {
+      setCvDraft(profile.cv.content);
+    } else if (profile) {
+      setCvDraft('');
+    }
+    setCvDirty(false);
+    setCvSaveError(null);
+    setCvSaved(false);
+  }, [profile?.cv?.content, profile]);
+
+  const handleSaveCv = async () => {
+    setCvSaving(true);
+    setCvSaveError(null);
+    setCvSaved(false);
+    try {
+      await saveCv(cvDraft);
+      setCvDirty(false);
+      setCvSaved(true);
+    } catch (err) {
+      setCvSaveError(err instanceof Error ? err.message : 'Failed to save CV');
+    } finally {
+      setCvSaving(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -90,14 +122,21 @@ export function ProfileView({ profile, doctor, doctorError, loading, error }: Pr
           )}
         </div>
 
-        {profile.cv && (
-          <div className="glass-panel p-5">
-            <h3 className="mb-4 font-display text-sm font-semibold text-subtle">CV Preview ({profile.cv.path})</h3>
-            <div className="prose-career max-h-96 overflow-y-auto">
-              <ReactMarkdown>{profile.cv.content}</ReactMarkdown>
-            </div>
-          </div>
-        )}
+        <CvEditorPanel
+          cvPath={profile.cv?.path}
+          cvDraft={cvDraft}
+          cvDirty={cvDirty}
+          cvSaving={cvSaving}
+          cvSaved={cvSaved}
+          cvSaveError={cvSaveError}
+          onDraftChange={(value) => {
+            setCvDraft(value);
+            setCvDirty(true);
+            setCvSaved(false);
+          }}
+          onSave={handleSaveCv}
+          showOnboardingHint={!profile.cv}
+        />
         {profile.profile && (
           <div className="glass-panel p-5">
             <h3 className="mb-4 font-display text-sm font-semibold text-subtle">Profile ({profile.profile.path})</h3>
@@ -137,12 +176,21 @@ export function ProfileView({ profile, doctor, doctorError, loading, error }: Pr
         </button>
       </div>
 
-      {tab === 'cv' && profile?.cv && (
-        <div className="glass-panel p-5">
-          <div className="prose-career max-h-[70vh] overflow-y-auto">
-            <ReactMarkdown>{profile.cv.content}</ReactMarkdown>
-          </div>
-        </div>
+      {tab === 'cv' && (
+        <CvEditorPanel
+          cvPath={profile?.cv?.path}
+          cvDraft={cvDraft}
+          cvDirty={cvDirty}
+          cvSaving={cvSaving}
+          cvSaved={cvSaved}
+          cvSaveError={cvSaveError}
+          onDraftChange={(value) => {
+            setCvDraft(value);
+            setCvDirty(true);
+            setCvSaved(false);
+          }}
+          onSave={handleSaveCv}
+        />
       )}
 
       {tab === 'profile' && profile?.profile && (
@@ -166,6 +214,81 @@ export function ProfileView({ profile, doctor, doctorError, loading, error }: Pr
             ))}
           </ul>
         </div>
+      )}
+    </div>
+  );
+}
+
+function CvEditorPanel({
+  cvPath,
+  cvDraft,
+  cvDirty,
+  cvSaving,
+  cvSaved,
+  cvSaveError,
+  onDraftChange,
+  onSave,
+  showOnboardingHint = false,
+}: {
+  cvPath?: string;
+  cvDraft: string;
+  cvDirty: boolean;
+  cvSaving: boolean;
+  cvSaved: boolean;
+  cvSaveError: string | null;
+  onDraftChange: (value: string) => void;
+  onSave: () => void;
+  showOnboardingHint?: boolean;
+}) {
+  return (
+    <div className="glass-panel p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="font-display text-sm font-semibold text-subtle">
+            Default Resume {cvPath ? `(${cvPath})` : '(cv.md or data/cv.md)'}
+          </h3>
+          <p className="mt-1 text-sm text-subtle">
+            {showOnboardingHint
+              ? 'Create your CV here — required for Matches resume generation'
+              : 'Edit your default resume — used by one-click resume generation on Matches'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {cvSaved && (
+            <span className="inline-flex items-center gap-1 text-xs text-green">
+              <Check className="h-3 w-3" /> Saved
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={!cvDirty || cvSaving || !cvDraft.trim()}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue/15 px-3 py-2 text-sm font-medium text-blue transition-colors hover:bg-blue/25 disabled:opacity-50"
+          >
+            {cvSaving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            Save
+          </button>
+        </div>
+      </div>
+      <textarea
+        value={cvDraft}
+        onChange={(e) => onDraftChange(e.target.value)}
+        placeholder="# Your Name&#10;&#10;## Professional Summary&#10;..."
+        className="min-h-[40vh] w-full rounded-xl border border-overlay/50 bg-mantle/50 p-4 font-mono text-sm leading-relaxed text-text focus:border-blue/50 focus:outline-none focus:ring-1 focus:ring-blue/30"
+        spellCheck={false}
+      />
+      {cvSaveError && <p className="mt-3 text-sm text-red">{cvSaveError}</p>}
+      {cvDraft.trim() && (
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm text-muted">Preview rendered markdown</summary>
+          <div className="prose-career mt-3 max-h-[40vh] overflow-y-auto rounded-lg bg-surface/30 p-4">
+            <ReactMarkdown>{cvDraft}</ReactMarkdown>
+          </div>
+        </details>
       )}
     </div>
   );
