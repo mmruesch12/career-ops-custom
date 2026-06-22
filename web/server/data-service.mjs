@@ -810,6 +810,14 @@ export function getResumePrerequisites(careerOpsPath = CAREER_OPS_ROOT) {
   };
 }
 
+export function getEvaluatePrerequisites(careerOpsPath = CAREER_OPS_ROOT) {
+  const resume = getResumePrerequisites(careerOpsPath);
+  return {
+    ...resume,
+    canEvaluate: resume.canGenerateResume,
+  };
+}
+
 export function computeMatches(careerOpsPath = CAREER_OPS_ROOT) {
   const minScore = loadMatchMinScore(careerOpsPath);
   const apps = enrichApplications(parseApplications(careerOpsPath), careerOpsPath);
@@ -880,7 +888,7 @@ export function computeMatches(careerOpsPath = CAREER_OPS_ROOT) {
     minScore,
     evaluatedMatches,
     recentDiscoveries,
-    prerequisites: getResumePrerequisites(careerOpsPath),
+    prerequisites: getEvaluatePrerequisites(careerOpsPath),
     generatedAt: new Date().toISOString(),
   };
 }

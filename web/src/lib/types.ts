@@ -95,6 +95,7 @@ export interface StateOption {
 export interface PipelineInbox {
   content: string;
   pending: { line: string; url: string }[];
+  prerequisites?: ResumePrerequisites;
 }
 
 export interface FollowupContact {
@@ -261,6 +262,7 @@ export interface ResumePrerequisites {
   hasXaiKey: boolean;
   cvPath: string | null;
   canGenerateResume: boolean;
+  canEvaluate?: boolean;
 }
 
 export interface MatchData {
@@ -279,6 +281,18 @@ export interface ResumeGenerationResult {
   role?: string;
   trackerUpdated?: boolean;
   reportUpdated?: boolean;
+  error?: string;
+  hint?: string;
+}
+
+export interface EvaluateResult {
+  ok: boolean;
+  reportNumber?: string;
+  reportPath?: string;
+  score?: number | string;
+  company?: string;
+  role?: string;
+  removedFromPipeline?: boolean;
   error?: string;
   hint?: string;
 }

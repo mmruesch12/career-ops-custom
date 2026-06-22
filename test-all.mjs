@@ -318,10 +318,15 @@ try {
   const fellBackToActive = await checkUrlLivenessWithFallback(challengePage(), URL, {
     getHeadedPage: async () => livePage(),
   });
-  if (fellBackToActive.result === 'active') {
+  if (fellBackToActive.result === 'active' && fellBackToActive.activePage) {
     pass('Headed fallback recovers a challenge-blocked page as active');
   } else {
     fail(`Headed fallback did not recover page: ${fellBackToActive.result} (${fellBackToActive.code})`);
+  }
+  if (fellBackToActive.httpStatus === 200) {
+    pass('checkUrlLivenessWithFallback exposes httpStatus from navigation');
+  } else {
+    fail(`checkUrlLivenessWithFallback httpStatus unexpected: ${fellBackToActive.httpStatus}`);
   }
 
   const noProvider = await checkUrlLivenessWithFallback(challengePage(), URL, {});
@@ -3962,26 +3967,36 @@ try {
   fail(`ibm provider tests crashed: ${e.message}`);
 }
 
-console.log('\n25. Web dashboard — matches + tailored resume');
+console.log('\n25. Web dashboard — matches + tailored resume + evaluate');
 
 try {
+  if (fileExists('evaluate-offer.mjs')) pass('evaluate-offer.mjs exists');
+  else fail('evaluate-offer.mjs missing');
+
   const scriptsRunner = readFile('web/server/scripts-runner.mjs');
-  if (scriptsRunner.includes("'generate-tailored-resume.mjs'") && scriptsRunner.includes('runScriptJSONOk')) {
+  if (
+    scriptsRunner.includes("'generate-tailored-resume.mjs'")
+    && scriptsRunner.includes("'evaluate-offer.mjs'")
+    && scriptsRunner.includes('runScriptJSONOk')
+  ) {
     pass('scripts-runner allowlist + runScriptJSONOk helper present');
   } else {
-    fail('scripts-runner missing generate-tailored-resume.mjs or runScriptJSONOk');
+    fail('scripts-runner missing generate-tailored-resume.mjs, evaluate-offer.mjs, or runScriptJSONOk');
   }
 
   const serverIndex = readFile('web/server/index.mjs');
   if (
     serverIndex.includes("app.get('/api/matches'")
+    && serverIndex.includes("app.post('/api/actions/evaluate'")
     && serverIndex.includes("'300kb'")
     && serverIndex.includes('getResumePrerequisites')
+    && serverIndex.includes('getEvaluatePrerequisites')
     && serverIndex.includes('runScriptJSONOk')
+    && serverIndex.includes("'evaluate-offer.mjs'")
   ) {
-    pass('web server exposes matches/cv/resume with preflight + 300kb CV body limit');
+    pass('web server exposes matches/evaluate/cv/resume with preflight + 300kb CV body limit');
   } else {
-    fail('web server missing matches/cv/resume enhancements');
+    fail('web server missing matches/evaluate/cv/resume enhancements');
   }
 
   const mutexSrc = readFile('web/server/mutex.mjs');
@@ -3995,10 +4010,15 @@ try {
   if (genResumeSyntax !== null) pass('generate-tailored-resume.mjs syntax OK');
   else fail('generate-tailored-resume.mjs has syntax errors');
 
+  const evalOfferSyntax = run(NODE, ['--check', 'evaluate-offer.mjs']);
+  if (evalOfferSyntax !== null) pass('evaluate-offer.mjs syntax OK');
+  else fail('evaluate-offer.mjs has syntax errors');
+
   const {
     computeMatches,
     saveCv,
     getResumePrerequisites,
+    getEvaluatePrerequisites,
   } = await import(pathToFileURL(join(ROOT, 'web/server/data-service.mjs')).href);
   const { resolveCvRelativePath } = await import(pathToFileURL(join(ROOT, 'cv-path.mjs')).href);
 
@@ -4008,10 +4028,23 @@ try {
     && Array.isArray(matches.evaluatedMatches)
     && Array.isArray(matches.recentDiscoveries)
     && matches.prerequisites
+    && typeof matches.prerequisites.canEvaluate === 'boolean'
   ) {
     pass(`computeMatches() shape OK (minScore=${matches.minScore}, matches=${matches.evaluatedMatches.length})`);
   } else {
     fail(`computeMatches() unexpected shape: ${JSON.stringify(matches)}`);
+  }
+
+  const evalPrereqs = getEvaluatePrerequisites(ROOT);
+  if (
+    typeof evalPrereqs.hasCv === 'boolean'
+    && typeof evalPrereqs.hasXaiKey === 'boolean'
+    && typeof evalPrereqs.canEvaluate === 'boolean'
+    && evalPrereqs.canEvaluate === (evalPrereqs.hasCv && evalPrereqs.hasXaiKey)
+  ) {
+    pass('getEvaluatePrerequisites() shape OK');
+  } else {
+    fail(`getEvaluatePrerequisites unexpected: ${JSON.stringify(evalPrereqs)}`);
   }
 
   const evaluatedOnly = matches.evaluatedMatches.every((m) => m.score >= matches.minScore && m.reportNumber && m.reportPath);
@@ -4098,6 +4131,181 @@ try {
     pass('generate-tailored-resume.mjs fails clearly without XAI_API_KEY');
   } else {
     fail(`generate-tailored-resume.mjs missing-key output unexpected: ${noXaiOut}`);
+  }
+
+  let evalNoXaiOut = '';
+  try {
+    execFileSync(NODE, ['evaluate-offer.mjs', '--file', 'README.md'], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      env: { ...process.env, XAI_API_KEY: '' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    evalNoXaiOut = (err.stdout || '').trim();
+  }
+  if (evalNoXaiOut.includes('"ok":false') && evalNoXaiOut.includes('XAI_API_KEY')) {
+    pass('evaluate-offer.mjs fails clearly without XAI_API_KEY');
+  } else {
+    fail(`evaluate-offer.mjs missing-key output unexpected: ${evalNoXaiOut}`);
+  }
+
+  const apiTs = readFile('web/src/lib/api.ts');
+  if (apiTs.includes('evaluateOffer') && apiTs.includes('/actions/evaluate')) {
+    pass('web api client exposes evaluateOffer()');
+  } else {
+    fail('web api client missing evaluateOffer()');
+  }
+
+  const evalSrc = readFile('evaluate-offer.mjs');
+  if (evalSrc.includes('reserve-report-num.mjs') && evalSrc.includes('--release')) {
+    pass('evaluate-offer uses atomic reserve-report-num');
+  } else {
+    fail('evaluate-offer missing reserve-report-num integration');
+  }
+  if (evalSrc.includes('rejectPrivateOrInvalid(finalUrl)')) {
+    pass('evaluate-offer validates finalUrl after redirect');
+  } else {
+    fail('evaluate-offer missing post-redirect SSRF guard');
+  }
+  if (
+    evalSrc.includes('**Archetype:**')
+    && /\*\*Score:\*\*[\s\S]*\*\*URL:\*\*/.test(evalSrc)
+    && /\*\*URL:\*\*[\s\S]*\*\*Legitimacy:\*\*[\s\S]*\*\*PDF:\*\*/.test(evalSrc)
+  ) {
+    pass('evaluate-offer report header order matches AGENTS.md');
+  } else {
+    fail('evaluate-offer report header order drift');
+  }
+  if (/trackerFields[\s\S]*?'Evaluated'[\s\S]*?normalizedTrackerScore/.test(evalSrc)) {
+    pass('evaluate-offer TSV status column precedes score');
+  } else {
+    fail('evaluate-offer TSV column order wrong');
+  }
+  if (evalSrc.includes('merge-tracker.mjs')) {
+    pass('evaluate-offer invokes merge-tracker.mjs');
+  } else {
+    fail('evaluate-offer missing merge-tracker invocation');
+  }
+  if (evalSrc.includes('checkUrlLivenessWithFallback') && evalSrc.includes('activePage')) {
+    pass('evaluate-offer JD extraction uses shared checkUrlLivenessWithFallback');
+  } else {
+    fail('evaluate-offer missing shared headed-fallback JD extraction');
+  }
+  const saveReportBlock = evalSrc.match(/writeFileSync\(reportPath[\s\S]*?merge-tracker/)?.[0] || '';
+  if (
+    saveReportBlock.includes('finally')
+    && saveReportBlock.includes('releaseReportNumber(num)')
+  ) {
+    pass('evaluate-offer releases report sentinel in finally on success path');
+  } else {
+    fail('evaluate-offer missing finally sentinel release');
+  }
+  if (/catch \(err\)[\s\S]*releaseReportNumber\(num\)[\s\S]*fail\(/.test(saveReportBlock)) {
+    pass('evaluate-offer releases sentinel in catch before fail() on save error');
+  } else {
+    fail('evaluate-offer missing catch-before-fail sentinel release');
+  }
+
+  const scriptsRunnerHint = readFile('web/server/scripts-runner.mjs');
+  if (scriptsRunnerHint.includes('err.hint = result.data.hint')) {
+    pass('runScriptJSONOk forwards script hint');
+  } else {
+    fail('runScriptJSONOk missing hint propagation');
+  }
+
+  if (serverIndex.includes('rejectPrivateOrInvalid(trimmedUrl)')) {
+    pass('evaluate API preflight calls rejectPrivateOrInvalid');
+  } else {
+    fail('evaluate API missing SSRF preflight');
+  }
+  if (/pipeline-inbox[\s\S]*getEvaluatePrerequisites/.test(serverIndex)) {
+    pass('pipeline-inbox endpoint includes evaluate prerequisites');
+  } else {
+    fail('pipeline-inbox missing evaluate prerequisites');
+  }
+
+  if (fileExists('cv.md') || fileExists('data/cv.md')) {
+    let blockedOut = '';
+    try {
+      execFileSync(NODE, ['evaluate-offer.mjs', '--url', 'http://127.0.0.1/jobs/test'], {
+        cwd: ROOT,
+        encoding: 'utf-8',
+        env: { ...process.env, XAI_API_KEY: process.env.XAI_API_KEY || 'test-key' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (err) {
+      blockedOut = (err.stdout || '').trim();
+    }
+    let blockedJson = null;
+    try {
+      const line = blockedOut.split('\n').filter((l) => l.startsWith('{')).pop() || blockedOut;
+      blockedJson = JSON.parse(line);
+    } catch {
+      blockedJson = null;
+    }
+    if (blockedJson?.ok === false && blockedJson?.hint) {
+      pass('evaluate-offer emits hint for blocked URL');
+    } else {
+      fail(`evaluate-offer blocked URL hint missing: ${blockedOut}`);
+    }
+
+    const { runScriptJSONOk } = await import(pathToFileURL(join(ROOT, 'web/server/scripts-runner.mjs')).href);
+    let hintForwarded = false;
+    try {
+      await runScriptJSONOk('evaluate-offer.mjs', ['--url', 'http://127.0.0.1/jobs/test'], { timeout: 30_000 });
+    } catch (err) {
+      hintForwarded = Boolean(err.hint);
+    }
+    if (hintForwarded) pass('runScriptJSONOk forwards evaluate-offer hint on blocked URL');
+    else fail('runScriptJSONOk did not forward script hint');
+  } else {
+    warn('cv.md absent — skipped evaluate-offer blocked URL hint tests');
+  }
+
+  const { consumePipelineUrl } = await import(pathToFileURL(join(ROOT, 'evaluate-offer.mjs')).href);
+  const pipelineFixture = mkdtempSync(join(tmpdir(), 'career-ops-pipeline-consume-'));
+  try {
+    mkdirSync(join(pipelineFixture, 'data'));
+    const pipelineUrl = 'https://jobs.example.com/pipeline-role-99/';
+    const pipelineUrlNorm = 'https://jobs.example.com/pipeline-role-99';
+    writeFileSync(
+      join(pipelineFixture, 'data', 'pipeline.md'),
+      `# Inbox\n- ${pipelineUrlNorm}\n- https://jobs.example.com/other\n`,
+    );
+    const removed = consumePipelineUrl(pipelineUrl, pipelineFixture);
+    const after = readFileSync(join(pipelineFixture, 'data', 'pipeline.md'), 'utf-8');
+    if (removed && !after.includes(pipelineUrlNorm) && after.includes('jobs.example.com/other')) {
+      pass('consumePipelineUrl() removes normalized URL match only');
+    } else {
+      fail(`consumePipelineUrl fixture failed: removed=${removed} content=${after}`);
+    }
+  } finally {
+    rmSync(pipelineFixture, { recursive: true, force: true });
+  }
+
+  const matchesViewSrc = readFile('web/src/components/MatchesView.tsx');
+  if (matchesViewSrc.includes('disabled') && matchesViewSrc.includes("evalState.status === 'success'")) {
+    pass('MatchesView disables evaluate after success and supports scan disabled');
+  } else {
+    fail('MatchesView missing duplicate-eval guard or scan disabled');
+  }
+
+  const inboxViewSrc = readFile('web/src/components/InboxView.tsx');
+  if (
+    inboxViewSrc.includes('useEffect')
+    && inboxViewSrc.includes('pendingSet')
+    && inboxViewSrc.includes("evalState.status === 'success'")
+  ) {
+    pass('InboxView prunes evalStates and disables evaluate after success');
+  } else {
+    fail('InboxView missing evalStates cleanup or success guard');
+  }
+
+  if (matchesViewSrc.includes('discoveryUrls') && matchesViewSrc.includes('setEvalStates')) {
+    pass('MatchesView prunes evalStates when discoveries refresh');
+  } else {
+    fail('MatchesView missing evalStates discovery pruning');
   }
 
   if (!fileExists('cv.md') && !fileExists('data/cv.md')) {

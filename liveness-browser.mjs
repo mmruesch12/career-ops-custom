@@ -128,7 +128,7 @@ export function rejectPrivateOrInvalid(url) {
 export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
   const guardError = rejectPrivateOrInvalid(url);
   if (guardError) {
-    return { result: 'uncertain', code: guardError.code, reason: guardError.reason };
+    return { result: 'uncertain', code: guardError.code, reason: guardError.reason, httpStatus: 0 };
   }
   try {
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS });
@@ -173,7 +173,7 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         .filter(Boolean);
     });
 
-    return classifyLiveness({ status, finalUrl, bodyText, applyControls });
+    return { ...classifyLiveness({ status, finalUrl, bodyText, applyControls }), httpStatus: status };
   } catch (err) {
     // Transient failures (timeout, DNS, TLS, 5xx) shouldn't be treated as expired —
     // doing so would cause scan --verify to drop the URL and write it to scan-history,
@@ -182,6 +182,7 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
       result: 'uncertain',
       code: 'navigation_error',
       reason: `navigation error: ${err.message.split('\n')[0]}`,
+      httpStatus: 0,
     };
   }
 }
@@ -238,16 +239,21 @@ export function createHeadedPageProvider(chromium) {
 // original uncertain result is kept — we never upgrade a block to expired.
 export async function checkUrlLivenessWithFallback(page, url, { getHeadedPage } = {}) {
   const first = await checkUrlLiveness(page, url);
-  if (!getHeadedPage || !isChallengeResult(first)) {
-    return first;
+  let activePage = page;
+  let liveness = first;
+
+  if (getHeadedPage && isChallengeResult(first)) {
+    const headedPage = await getHeadedPage();
+    if (headedPage) {
+      const second = await checkUrlLiveness(headedPage, url, { extraSettleMs: 3_000 });
+      if (!isChallengeResult(second)) {
+        activePage = headedPage;
+        liveness = second;
+      } else {
+        liveness = { ...second, reason: `${second.reason} (headed retry also blocked)` };
+      }
+    }
   }
-  const headedPage = await getHeadedPage();
-  if (!headedPage) {
-    return first;
-  }
-  const second = await checkUrlLiveness(headedPage, url, { extraSettleMs: 3_000 });
-  if (isChallengeResult(second)) {
-    return { ...second, reason: `${second.reason} (headed retry also blocked)` };
-  }
-  return second;
+
+  return { ...liveness, activePage };
 }

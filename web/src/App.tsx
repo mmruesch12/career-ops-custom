@@ -395,6 +395,7 @@ export default function App() {
           loading={viewLoading}
           error={viewError}
           onRefresh={refreshMatches}
+          disabled={scanning}
         />
       )}
 

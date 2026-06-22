@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertCircle, Download, ExternalLink, Loader2, Sparkles, Target } from 'lucide-react';
-import { generateResume, pdfUrl } from '../lib/api';
+import { AlertCircle, ClipboardCheck, Download, ExternalLink, Loader2, Sparkles, Target } from 'lucide-react';
+import { evaluateOffer, generateResume, pdfUrl } from '../lib/api';
 import type { EvaluatedMatch, MatchData, RecentDiscovery } from '../lib/types';
 import { ScoreBadge } from './ScoreBadge';
 import { timeAgo } from '../lib/utils';
@@ -10,6 +10,7 @@ interface Props {
   loading: boolean;
   error?: string | null;
   onRefresh?: () => void;
+  disabled?: boolean;
 }
 
 type GenState = {
@@ -18,15 +19,38 @@ type GenState = {
   pdfFilename?: string;
 };
 
-export function MatchesView({ data, loading, error, onRefresh }: Props) {
+type EvalState = {
+  status: 'idle' | 'evaluating' | 'success' | 'error';
+  message?: string;
+  reportNumber?: string;
+  score?: number | string;
+};
+
+export function MatchesView({ data, loading, error, onRefresh, disabled = false }: Props) {
   const [genStates, setGenStates] = useState<Record<string, GenState>>({});
+  const [evalStates, setEvalStates] = useState<Record<string, EvalState>>({});
   const [localMatches, setLocalMatches] = useState<EvaluatedMatch[] | null>(null);
   const requestIds = useRef<Record<string, number>>({});
+  const evalRequestIds = useRef<Record<string, number>>({});
   const inFlight = useRef<Set<string>>(new Set());
+  const evalInFlight = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setLocalMatches(null);
   }, [data?.generatedAt]);
+
+  useEffect(() => {
+    const discoveryUrls = new Set(
+      (data?.recentDiscoveries ?? []).map((d) => d.url).filter(Boolean),
+    );
+    setEvalStates((prev) => {
+      const next: Record<string, EvalState> = {};
+      for (const [itemUrl, state] of Object.entries(prev)) {
+        if (discoveryUrls.has(itemUrl)) next[itemUrl] = state;
+      }
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [data?.generatedAt, data?.recentDiscoveries]);
 
   const matches = localMatches ?? data?.evaluatedMatches ?? [];
 
@@ -51,6 +75,7 @@ export function MatchesView({ data, loading, error, onRefresh }: Props) {
   if (!data) return null;
 
   const canGenerate = data.prerequisites?.canGenerateResume ?? false;
+  const canEvaluate = data.prerequisites?.canEvaluate ?? false;
 
   const handleGenerate = async (match: EvaluatedMatch) => {
     if (!match.reportNumber || inFlight.current.has(match.reportNumber)) return;
@@ -111,6 +136,54 @@ export function MatchesView({ data, loading, error, onRefresh }: Props) {
     }
   };
 
+  const handleEvaluate = async (discovery: RecentDiscovery) => {
+    if (!discovery.url || evalInFlight.current.has(discovery.url)) return;
+
+    const url = discovery.url;
+    const requestId = (evalRequestIds.current[url] || 0) + 1;
+    evalRequestIds.current[url] = requestId;
+    evalInFlight.current.add(url);
+
+    setEvalStates((prev) => ({
+      ...prev,
+      [url]: { status: 'evaluating', message: 'Evaluating offer… (60–180s)' },
+    }));
+
+    try {
+      const result = await evaluateOffer(url);
+      if (evalRequestIds.current[url] !== requestId) return;
+
+      if (!result.ok || !result.reportNumber) {
+        throw new Error(result.error || 'Evaluation failed');
+      }
+
+      setEvalStates((prev) => ({
+        ...prev,
+        [url]: {
+          status: 'success',
+          reportNumber: result.reportNumber,
+          score: result.score,
+          message: `Evaluated — ${result.company || 'role'} scored ${result.score ?? '?'}/5. See Pipeline for report #${result.reportNumber}.`,
+        },
+      }));
+
+      onRefresh?.();
+    } catch (err) {
+      if (evalRequestIds.current[url] !== requestId) return;
+      setEvalStates((prev) => ({
+        ...prev,
+        [url]: {
+          status: 'error',
+          message: err instanceof Error ? err.message : 'Evaluation failed',
+        },
+      }));
+    } finally {
+      if (evalRequestIds.current[url] === requestId) {
+        evalInFlight.current.delete(url);
+      }
+    }
+  };
+
   return (
     <div className="space-y-8 animate-fade-in">
       <div className="flex items-center gap-3">
@@ -125,12 +198,18 @@ export function MatchesView({ data, loading, error, onRefresh }: Props) {
         </div>
       </div>
 
-      {!canGenerate && (
+      {disabled && (
+        <div className="rounded-xl border border-yellow/30 bg-yellow/10 px-4 py-3 text-sm text-yellow">
+          A scan is in progress — evaluate actions are disabled until it finishes.
+        </div>
+      )}
+
+      {(!canGenerate || !canEvaluate) && (
         <div className="rounded-xl border border-yellow/30 bg-yellow/10 px-4 py-3 text-sm text-yellow">
           <div className="flex items-start gap-2">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
-              <p className="font-medium">Resume generation prerequisites missing</p>
+              <p className="font-medium">Evaluate &amp; resume prerequisites missing</p>
               <ul className="mt-1 list-inside list-disc text-xs text-yellow/90">
                 {!data.prerequisites.hasCv && (
                   <li>
@@ -144,7 +223,7 @@ export function MatchesView({ data, loading, error, onRefresh }: Props) {
                 )}
               </ul>
               <p className="mt-2 text-xs text-muted">
-                AI tailoring rewords your real experience only — always review the PDF before applying. Residual LLM risk remains.
+                Evaluation and resume tailoring use xAI Grok with your real CV — always review reports and PDFs before applying.
               </p>
             </div>
           </div>
@@ -199,12 +278,19 @@ export function MatchesView({ data, loading, error, onRefresh }: Props) {
         {data.recentDiscoveries.length === 0 ? (
           <div className="glass-panel py-10 text-center">
             <p className="text-sm text-subtle">No new scan discoveries in the last two weeks</p>
-            <p className="mt-1 text-xs text-muted">Run Scan to find fresh roles, then evaluate via CLI</p>
+            <p className="mt-1 text-xs text-muted">Run Scan to find fresh roles, then evaluate them here</p>
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {data.recentDiscoveries.map((discovery, index) => (
-              <DiscoveryCard key={discovery.url || `discovery-${index}`} discovery={discovery} />
+              <DiscoveryCard
+                key={discovery.url || `discovery-${index}`}
+                discovery={discovery}
+                evalState={evalStates[discovery.url] || { status: 'idle' }}
+                canEvaluate={canEvaluate}
+                disabled={disabled}
+                onEvaluate={() => handleEvaluate(discovery)}
+              />
             ))}
           </div>
         )}
@@ -299,16 +385,29 @@ function MatchCard({
   );
 }
 
-function DiscoveryCard({ discovery }: { discovery: RecentDiscovery }) {
+function DiscoveryCard({
+  discovery,
+  evalState,
+  canEvaluate,
+  disabled,
+  onEvaluate,
+}: {
+  discovery: RecentDiscovery;
+  evalState: EvalState;
+  canEvaluate: boolean;
+  disabled: boolean;
+  onEvaluate: () => void;
+}) {
+  const isEvaluating = evalState.status === 'evaluating';
+  const isSuccess = evalState.status === 'success';
+  const numericScore = typeof evalState.score === 'number'
+    ? evalState.score
+    : parseFloat(String(evalState.score ?? ''));
+
   return (
-    <a
-      href={discovery.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="glass-panel block p-4 transition-colors hover:border-blue/30 hover:bg-surface/40"
-    >
+    <div className="glass-panel flex flex-col p-4">
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="font-display text-sm font-semibold text-text">
             {discovery.company || 'Unknown company'}
           </p>
@@ -316,7 +415,19 @@ function DiscoveryCard({ discovery }: { discovery: RecentDiscovery }) {
             {discovery.title || discovery.url}
           </p>
         </div>
-        <ExternalLink className="h-4 w-4 shrink-0 text-muted" />
+        {evalState.status === 'success' && Number.isFinite(numericScore) ? (
+          <ScoreBadge score={numericScore} />
+        ) : (
+          <a
+            href={discovery.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 text-muted transition-colors hover:text-blue"
+            title="Open job posting"
+          >
+            <ExternalLink className="h-4 w-4" />
+          </a>
+        )}
       </div>
       <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted">
         <span>{discovery.firstSeen}</span>
@@ -325,6 +436,50 @@ function DiscoveryCard({ discovery }: { discovery: RecentDiscovery }) {
         )}
         {discovery.location && <span>{discovery.location}</span>}
       </div>
-    </a>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-overlay/30 pt-3">
+        {isEvaluating ? (
+          <span className="inline-flex items-center gap-2 text-sm text-subtle">
+            <Loader2 className="h-4 w-4 animate-spin text-sky" />
+            {evalState.message || 'Evaluating…'}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={onEvaluate}
+            disabled={disabled || !canEvaluate || isEvaluating || isSuccess}
+            title={
+              disabled
+                ? 'Scan in progress'
+                : !canEvaluate
+                  ? 'Set up cv.md and XAI_API_KEY first'
+                  : isSuccess
+                    ? 'Already evaluated'
+                    : undefined
+            }
+            className="inline-flex items-center gap-2 rounded-lg bg-sky/15 px-3 py-2 text-sm font-medium text-sky transition-colors hover:bg-sky/25 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ClipboardCheck className="h-4 w-4" />
+            Evaluate
+          </button>
+        )}
+
+        <a
+          href={discovery.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-blue hover:underline"
+        >
+          <ExternalLink className="h-3 w-3" /> View posting
+        </a>
+
+        {evalState.status === 'error' && (
+          <p className="w-full text-sm text-red">{evalState.message}</p>
+        )}
+        {evalState.status === 'success' && evalState.message && (
+          <p className="w-full text-xs text-green">{evalState.message}</p>
+        )}
+      </div>
+    </div>
   );
 }

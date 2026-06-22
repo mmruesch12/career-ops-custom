@@ -10,6 +10,7 @@ import type {
   PortalsData,
   ProfileData,
   ProgressMetrics,
+  EvaluateResult,
   ResumeGenerationResult,
   ScanHistoryData,
   ScriptResult,
@@ -138,11 +139,20 @@ export function saveCv(content: string) {
 }
 
 const RESUME_REQUEST_TIMEOUT_MS = 190_000;
+const EVALUATE_REQUEST_TIMEOUT_MS = 310_000;
 
 export function generateResume(reportNumber: string) {
   return fetchMutating<ResumeGenerationResult>(`/actions/resume/${reportNumber}`, {
     method: 'POST',
     signal: AbortSignal.timeout(RESUME_REQUEST_TIMEOUT_MS),
+  });
+}
+
+export function evaluateOffer(url: string) {
+  return fetchMutating<EvaluateResult>('/actions/evaluate', {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+    signal: AbortSignal.timeout(EVALUATE_REQUEST_TIMEOUT_MS),
   });
 }
 

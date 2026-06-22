@@ -16,6 +16,7 @@ const ALLOWED_SCRIPTS = new Set([
   'verify-pipeline.mjs',
   'generate-pdf.mjs',
   'generate-tailored-resume.mjs',
+  'evaluate-offer.mjs',
   'normalize-statuses.mjs',
   'dedup-tracker.mjs',
   'merge-tracker.mjs',
@@ -166,6 +167,7 @@ export async function runScriptJSONOk(script, args = [], options = {}) {
     err.statusCode = 400;
     err.exitCode = result.exitCode;
     err.scriptResult = result;
+    if (result.data?.hint) err.hint = result.data.hint;
     throw err;
   }
   return result;

@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { Inbox, Link2, Loader2, Plus, Trash2 } from 'lucide-react';
-import { addPipelineUrl, removePipelineUrl } from '../lib/api';
+import { useEffect, useRef, useState } from 'react';
+import { AlertCircle, ClipboardCheck, ExternalLink, Inbox, Link2, Loader2, Plus, Trash2 } from 'lucide-react';
+import { addPipelineUrl, evaluateOffer, removePipelineUrl } from '../lib/api';
 import type { PipelineInbox } from '../lib/types';
+import { ScoreBadge } from './ScoreBadge';
 
 interface Props {
   inbox: PipelineInbox | null;
@@ -10,11 +11,25 @@ interface Props {
   disabled?: boolean;
 }
 
+type EvalState = {
+  status: 'idle' | 'evaluating' | 'success' | 'error';
+  message?: string;
+  reportNumber?: string;
+  score?: number | string;
+};
+
 export function InboxView({ inbox, loading, onRefresh, disabled = false }: Props) {
   const [url, setUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [evalStates, setEvalStates] = useState<Record<string, EvalState>>({});
+  const evalRequestIds = useRef<Record<string, number>>({});
+  const evalInFlight = useRef<Set<string>>(new Set());
+
+  const canEvaluate = inbox?.prerequisites?.canEvaluate
+    ?? inbox?.prerequisites?.canGenerateResume
+    ?? false;
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,7 +60,65 @@ export function InboxView({ inbox, loading, onRefresh, disabled = false }: Props
     }
   };
 
+  const handleEvaluate = async (itemUrl: string) => {
+    if (evalInFlight.current.has(itemUrl)) return;
+
+    const requestId = (evalRequestIds.current[itemUrl] || 0) + 1;
+    evalRequestIds.current[itemUrl] = requestId;
+    evalInFlight.current.add(itemUrl);
+
+    setEvalStates((prev) => ({
+      ...prev,
+      [itemUrl]: { status: 'evaluating', message: 'Evaluating offer… (60–180s)' },
+    }));
+
+    try {
+      const result = await evaluateOffer(itemUrl);
+      if (evalRequestIds.current[itemUrl] !== requestId) return;
+
+      if (!result.ok || !result.reportNumber) {
+        throw new Error(result.error || 'Evaluation failed');
+      }
+
+      setEvalStates((prev) => ({
+        ...prev,
+        [itemUrl]: {
+          status: 'success',
+          reportNumber: result.reportNumber,
+          score: result.score,
+          message: `Evaluated — report #${result.reportNumber} (${result.score ?? '?'}/5). ${result.removedFromPipeline ? 'Removed from inbox.' : ''}`,
+        },
+      }));
+
+      onRefresh();
+    } catch (err) {
+      if (evalRequestIds.current[itemUrl] !== requestId) return;
+      setEvalStates((prev) => ({
+        ...prev,
+        [itemUrl]: {
+          status: 'error',
+          message: err instanceof Error ? err.message : 'Evaluation failed',
+        },
+      }));
+    } finally {
+      if (evalRequestIds.current[itemUrl] === requestId) {
+        evalInFlight.current.delete(itemUrl);
+      }
+    }
+  };
+
   const pending = inbox?.pending ?? [];
+
+  useEffect(() => {
+    const pendingSet = new Set(pending.map((p) => p.url));
+    setEvalStates((prev) => {
+      const next: Record<string, EvalState> = {};
+      for (const [itemUrl, state] of Object.entries(prev)) {
+        if (pendingSet.has(itemUrl)) next[itemUrl] = state;
+      }
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [inbox]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -63,6 +136,29 @@ export function InboxView({ inbox, loading, onRefresh, disabled = false }: Props
           {pending.length} pending
         </span>
       </div>
+
+      {!canEvaluate && (
+        <div className="rounded-xl border border-yellow/30 bg-yellow/10 px-4 py-3 text-sm text-yellow">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-medium">Evaluation prerequisites missing</p>
+              <ul className="mt-1 list-inside list-disc text-xs text-yellow/90">
+                {!inbox?.prerequisites?.hasCv && (
+                  <li>
+                    Add <code className="text-blue">cv.md</code> in Profile
+                  </li>
+                )}
+                {!inbox?.prerequisites?.hasXaiKey && (
+                  <li>
+                    Set <code className="text-blue">XAI_API_KEY</code> in <code className="text-blue">.env</code>
+                  </li>
+                )}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {disabled && (
         <div className="rounded-xl border border-yellow/30 bg-yellow/10 px-4 py-3 text-sm text-yellow">
@@ -107,40 +203,98 @@ export function InboxView({ inbox, loading, onRefresh, disabled = false }: Props
         <div className="glass-panel py-16 text-center">
           <p className="font-display text-lg text-subtle">Inbox is empty</p>
           <p className="mt-2 text-sm text-muted">
-            Add job URLs above, then run{' '}
-            <code className="rounded bg-surface px-1.5 py-0.5 text-blue">/career-ops pipeline</code> in your AI CLI.
+            Add job URLs above and evaluate them here — no CLI required.
           </p>
         </div>
       ) : (
         <div className="space-y-2">
-          {pending.map((item) => (
-            <div
-              key={item.url}
-              className="glass-panel flex items-center gap-3 p-4"
-            >
-              <a
-                href={item.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="min-w-0 flex-1 truncate text-sm text-blue hover:underline"
+          {pending.map((item) => {
+            const evalState = evalStates[item.url] || { status: 'idle' };
+            const isEvaluating = evalState.status === 'evaluating';
+            const isSuccess = evalState.status === 'success';
+            const numericScore = typeof evalState.score === 'number'
+              ? evalState.score
+              : parseFloat(String(evalState.score ?? ''));
+
+            return (
+              <div
+                key={item.url}
+                className="glass-panel flex flex-col gap-3 p-4 sm:flex-row sm:items-center"
               >
-                {item.url}
-              </a>
-              <button
-                type="button"
-                onClick={() => handleRemove(item.url)}
-                disabled={disabled || removing === item.url}
-                className="rounded-lg p-2 text-subtle transition-colors hover:bg-red/10 hover:text-red disabled:opacity-50"
-                title="Remove from inbox"
-              >
-                {removing === item.url ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="h-4 w-4" />
+                <a
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-w-0 flex-1 truncate text-sm text-blue hover:underline"
+                >
+                  {item.url}
+                </a>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {evalState.status === 'success' && Number.isFinite(numericScore) && (
+                    <ScoreBadge score={numericScore} />
+                  )}
+
+                  {isEvaluating ? (
+                    <span className="inline-flex items-center gap-2 text-sm text-subtle">
+                      <Loader2 className="h-4 w-4 animate-spin text-sky" />
+                      {evalState.message || 'Evaluating…'}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleEvaluate(item.url)}
+                      disabled={disabled || !canEvaluate || isEvaluating || isSuccess}
+                      title={
+                        disabled
+                          ? 'Scan in progress'
+                          : !canEvaluate
+                            ? 'Set up cv.md and XAI_API_KEY first'
+                            : isSuccess
+                              ? 'Already evaluated'
+                              : undefined
+                      }
+                      className="inline-flex items-center gap-2 rounded-lg bg-sky/15 px-3 py-2 text-sm font-medium text-sky transition-colors hover:bg-sky/25 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <ClipboardCheck className="h-4 w-4" />
+                      Evaluate
+                    </button>
+                  )}
+
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-lg p-2 text-subtle transition-colors hover:bg-surface/60 hover:text-blue"
+                    title="Open posting"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(item.url)}
+                    disabled={disabled || removing === item.url || isEvaluating}
+                    className="rounded-lg p-2 text-subtle transition-colors hover:bg-red/10 hover:text-red disabled:opacity-50"
+                    title="Remove from inbox"
+                  >
+                    {removing === item.url ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+
+                {evalState.status === 'error' && (
+                  <p className="w-full text-sm text-red sm:order-last">{evalState.message}</p>
                 )}
-              </button>
-            </div>
-          ))}
+                {evalState.status === 'success' && evalState.message && (
+                  <p className="w-full text-xs text-green sm:order-last">{evalState.message}</p>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

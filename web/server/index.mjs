@@ -31,6 +31,7 @@ import {
   updateApplicationPdf,
   updateReportPdfPath,
   getResumePrerequisites,
+  getEvaluatePrerequisites,
 } from './data-service.mjs';
 import { runScript, runScriptJSON, runScriptJSONOk } from './scripts-runner.mjs';
 import {
@@ -39,6 +40,7 @@ import {
   withScriptLock,
   withTrackerScriptLock,
 } from './mutex.mjs';
+import { rejectPrivateOrInvalid } from '../../liveness-browser.mjs';
 
 const app = express();
 const PORT = process.env.PORT || 3847;
@@ -150,7 +152,10 @@ app.get('/api/progress', (_req, res) => {
 });
 
 app.get('/api/pipeline-inbox', (_req, res) => {
-  res.json(loadPipeline(ROOT));
+  res.json({
+    ...loadPipeline(ROOT),
+    prerequisites: getEvaluatePrerequisites(ROOT),
+  });
 });
 
 app.post('/api/pipeline-inbox', mutationMiddleware, async (req, res) => {
@@ -332,6 +337,55 @@ app.post('/api/actions/scan', mutationMiddleware, async (_req, res) => {
     res.json(result);
   } catch (err) {
     scriptError(res, err, err.statusCode || 500);
+  }
+});
+
+app.post('/api/actions/evaluate', mutationMiddleware, async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ ok: false, error: 'url required' });
+    }
+    const trimmedUrl = url.trim();
+    if (!/^https?:\/\//i.test(trimmedUrl)) {
+      return res.status(400).json({ ok: false, error: 'Invalid URL — only http and https are supported' });
+    }
+    const urlGuard = rejectPrivateOrInvalid(trimmedUrl);
+    if (urlGuard) {
+      return res.status(400).json({
+        ok: false,
+        error: urlGuard.reason,
+        hint: 'Provide a public http(s) job posting URL',
+      });
+    }
+
+    const prereqs = getEvaluatePrerequisites(ROOT);
+    if (!prereqs.hasCv) {
+      return res.status(400).json({
+        ok: false,
+        error: 'cv.md not found. Create your default resume in Profile first.',
+      });
+    }
+    if (!prereqs.hasXaiKey) {
+      return res.status(400).json({
+        ok: false,
+        error: 'XAI_API_KEY not found. Add it to .env at the repo root.',
+      });
+    }
+
+    const result = await withTrackerScriptLock(async () => {
+      const scriptResult = await runScriptJSONOk(
+        'evaluate-offer.mjs',
+        ['--url', trimmedUrl],
+        { timeout: 300_000 },
+      );
+      return scriptResult.data;
+    });
+    res.json(result);
+  } catch (err) {
+    const payload = { ok: false, error: err.message };
+    if (err.hint) payload.hint = err.hint;
+    res.status(err.statusCode || 500).json(payload);
   }
 });
 
