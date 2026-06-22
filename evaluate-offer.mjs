@@ -164,23 +164,35 @@ function resolveJdFilePath(filePath) {
   return resolved;
 }
 
+/** xAI/Grok often returns **A) Title** instead of ## A) Title — normalize for validation and storage. */
+export function normalizeEvaluationHeadings(text) {
+  return String(text || '')
+    .replace(/^\*\*([A-G])\)([^*\n]+)\*\*/gm, '## $1)$2');
+}
+
+const BLOCK_HEADING_PATTERN = (label) => new RegExp(
+  `(?:^|\\n)(?:#{1,3}\\s*(?:${label}[).:-]?|Block ${label}\\b)|\\*\\*${label}\\)[^*\\n]+\\*\\*)`,
+  'im',
+);
+
 function validateEvaluationShape(text) {
+  const normalized = normalizeEvaluationHeadings(text);
   const issues = [];
   const requiredBlocks = [
-    ['A', /(?:^|\n)#{1,3}\s*(?:A[).:-]?|Block A\b)/im],
-    ['B', /(?:^|\n)#{1,3}\s*(?:B[).:-]?|Block B\b)/im],
-    ['C', /(?:^|\n)#{1,3}\s*(?:C[).:-]?|Block C\b)/im],
-    ['D', /(?:^|\n)#{1,3}\s*(?:D[).:-]?|Block D\b)/im],
-    ['E', /(?:^|\n)#{1,3}\s*(?:E[).:-]?|Block E\b)/im],
-    ['F', /(?:^|\n)#{1,3}\s*(?:F[).:-]?|Block F\b)/im],
-    ['G', /(?:^|\n)#{1,3}\s*(?:G[).:-]?|Block G\b)/im],
+    ['A', BLOCK_HEADING_PATTERN('A')],
+    ['B', BLOCK_HEADING_PATTERN('B')],
+    ['C', BLOCK_HEADING_PATTERN('C')],
+    ['D', BLOCK_HEADING_PATTERN('D')],
+    ['E', BLOCK_HEADING_PATTERN('E')],
+    ['F', BLOCK_HEADING_PATTERN('F')],
+    ['G', BLOCK_HEADING_PATTERN('G')],
   ];
 
   for (const [label, pattern] of requiredBlocks) {
-    if (!pattern.test(text)) issues.push(`missing Block ${label}`);
+    if (!pattern.test(normalized)) issues.push(`missing Block ${label}`);
   }
 
-  const summary = text.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
+  const summary = normalized.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
   if (!summary) {
     issues.push('missing SCORE_SUMMARY block');
   } else {
@@ -200,7 +212,7 @@ function validateEvaluationShape(text) {
     }
   }
 
-  if (!/##\s*Machine Summary/i.test(text)) {
+  if (!/##\s*Machine Summary/i.test(normalized)) {
     issues.push('missing Machine Summary section');
   }
 
@@ -418,7 +430,7 @@ OPERATING RULES FOR THIS SESSION
 ═══════════════════════════════════════════════════════
 1. You do NOT have WebSearch. For Block D use training-data estimates, clearly labeled.
 2. For Block G (Legitimacy): analyze the JD text and any URL/liveness context below.
-3. Generate Blocks A through G in full, in English unless the JD is in another language.
+3. Generate Blocks A through G in full, in English unless the JD is in another language. Use markdown headings \`## A)\`, \`## B)\`, … \`## G)\` for each block (not bold).
 4. Include a \`## Machine Summary\` section with a YAML fence (field names from oferta/batch spec).
 5. At the very end (after all human-readable content), output:
 
@@ -467,17 +479,28 @@ let sourceUrl = '';
 let livenessNote = '';
 
 if (url) {
-  if (!/^https?:\/\//i.test(url)) {
-    fail('Invalid URL — only http and https are supported');
-  }
-  process.stderr.write(`Fetching JD from ${url}...\n`);
-  try {
-    const fetched = await fetchJdFromUrl(url);
-    jdText = fetched.jdText;
-    sourceUrl = fetched.finalUrl || url;
-    livenessNote = `${fetched.liveness} (HTTP ${fetched.httpStatus})${fetched.livenessReason ? ` — ${fetched.livenessReason}` : ''}`;
-  } catch (err) {
-    fail(redactSecrets(err.message), err.hint);
+  if (url.startsWith('local:')) {
+    const rel = url.slice('local:'.length).replace(/^\//, '');
+    if (!rel.startsWith('jds/') || rel.includes('..')) {
+      fail('local: URLs must point to jds/<file> inside the repo', 'Example: local:jds/my-role.txt');
+    }
+    const resolved = resolveJdFilePath(rel);
+    jdText = readFileSync(resolved, 'utf-8').trim();
+    if (!jdText) fail('JD file is empty');
+    sourceUrl = url;
+  } else {
+    if (!/^https?:\/\//i.test(url)) {
+      fail('Invalid URL — use http(s) or local:jds/<file>');
+    }
+    process.stderr.write(`Fetching JD from ${url}...\n`);
+    try {
+      const fetched = await fetchJdFromUrl(url);
+      jdText = fetched.jdText;
+      sourceUrl = fetched.finalUrl || url;
+      livenessNote = `${fetched.liveness} (HTTP ${fetched.httpStatus})${fetched.livenessReason ? ` — ${fetched.livenessReason}` : ''}`;
+    } catch (err) {
+      fail(redactSecrets(err.message), err.hint);
+    }
   }
 } else {
   const resolvedFile = resolveJdFilePath(filePath);
@@ -530,7 +553,7 @@ const reportPath = join(PATHS.reports, filename);
 const trackerPath = join(PATHS.trackerAdditions, `${num}-${companySlug}.tsv`);
 const reportRelative = `reports/${filename}`;
 
-const bodyWithoutSummary = evaluationText
+const bodyWithoutSummary = normalizeEvaluationHeadings(evaluationText)
   .replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '')
   .trim();
 

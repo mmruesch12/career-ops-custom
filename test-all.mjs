@@ -4219,6 +4219,28 @@ try {
   } else {
     fail('evaluate API missing SSRF preflight');
   }
+  if (serverIndex.includes("trimmedUrl.startsWith('local:jds/')")) {
+    pass('evaluate API supports local:jds fixture URLs');
+  } else {
+    fail('evaluate API missing local:jds support');
+  }
+  if (evalSrc.includes('normalizeEvaluationHeadings')) {
+    pass('evaluate-offer normalizes bold block headings from xAI');
+  } else {
+    fail('evaluate-offer missing normalizeEvaluationHeadings');
+  }
+  try {
+    const { normalizeEvaluationHeadings } = await import(pathToFileURL(join(ROOT, 'evaluate-offer.mjs')).href);
+    const sample = '**A) Role Summary**\n**G) Posting Legitimacy**\n## Machine Summary';
+    const normalized = normalizeEvaluationHeadings(sample);
+    if (/## A\) Role Summary/.test(normalized) && /## G\) Posting Legitimacy/.test(normalized)) {
+      pass('normalizeEvaluationHeadings converts **A) to ## A)');
+    } else {
+      fail('normalizeEvaluationHeadings did not convert bold block headings');
+    }
+  } catch (err) {
+    fail(`normalizeEvaluationHeadings import failed: ${err.message}`);
+  }
   if (/pipeline-inbox[\s\S]*getEvaluatePrerequisites/.test(serverIndex)) {
     pass('pipeline-inbox endpoint includes evaluate prerequisites');
   } else {

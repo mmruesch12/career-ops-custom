@@ -347,16 +347,30 @@ app.post('/api/actions/evaluate', mutationMiddleware, async (req, res) => {
       return res.status(400).json({ ok: false, error: 'url required' });
     }
     const trimmedUrl = url.trim();
-    if (!/^https?:\/\//i.test(trimmedUrl)) {
-      return res.status(400).json({ ok: false, error: 'Invalid URL — only http and https are supported' });
-    }
-    const urlGuard = rejectPrivateOrInvalid(trimmedUrl);
-    if (urlGuard) {
+    const isLocalJd = trimmedUrl.startsWith('local:jds/');
+    if (!isLocalJd && !/^https?:\/\//i.test(trimmedUrl)) {
       return res.status(400).json({
         ok: false,
-        error: urlGuard.reason,
-        hint: 'Provide a public http(s) job posting URL',
+        error: 'Invalid URL — use http(s) or local:jds/<file>',
       });
+    }
+    if (isLocalJd) {
+      if (!/^local:jds\/[a-zA-Z0-9._-]+$/.test(trimmedUrl)) {
+        return res.status(400).json({
+          ok: false,
+          error: 'local: URLs must be local:jds/<filename> (no path traversal)',
+          hint: 'Example: local:jds/test-slice-validation.txt',
+        });
+      }
+    } else {
+      const urlGuard = rejectPrivateOrInvalid(trimmedUrl);
+      if (urlGuard) {
+        return res.status(400).json({
+          ok: false,
+          error: urlGuard.reason,
+          hint: 'Provide a public http(s) job posting URL',
+        });
+      }
     }
 
     const prereqs = getEvaluatePrerequisites(ROOT);

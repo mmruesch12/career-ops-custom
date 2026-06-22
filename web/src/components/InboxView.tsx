@@ -27,9 +27,7 @@ export function InboxView({ inbox, loading, onRefresh, disabled = false }: Props
   const evalRequestIds = useRef<Record<string, number>>({});
   const evalInFlight = useRef<Set<string>>(new Set());
 
-  const canEvaluate = inbox?.prerequisites?.canEvaluate
-    ?? inbox?.prerequisites?.canGenerateResume
-    ?? false;
+  const canEvaluate = inbox?.prerequisites?.canEvaluate ?? false;
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
