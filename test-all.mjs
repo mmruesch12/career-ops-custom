@@ -1434,6 +1434,20 @@ try {
   }
 
   if (
+    titleFilter('AI') === false &&
+    titleFilter('AI Manager') === false &&
+    titleFilter('ML Head') === false &&
+    titleFilter('AI Coordinator') === false &&
+    titleFilter('AI Foo Bar') === false &&
+    titleFilter('AI Researcher') === true &&
+    titleFilter('AI Platform Engineer') === true
+  ) {
+    pass('buildTitleFilter rejects bare broad AI/ML titles lacking eng/platform/researcher qualifiers');
+  } else {
+    fail('buildTitleFilter bare-broad AI/ML matrix failed');
+  }
+
+  if (
     classifyTitleTier('Staff AI Engineer', titleFilterCfg, tierProfile) === 'A' &&
     classifyTitleTier('Strategic Account Executive, AI Native', titleFilterCfg, tierProfile) === null &&
     classifyTitleTier('Agent Engineer', titleFilterCfg, tierProfile) === 'A' &&

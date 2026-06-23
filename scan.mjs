@@ -132,12 +132,24 @@ const BROAD_POSITIVE_TERMS = new Set([
   'künstliche intelligenz', 'ki engineer', 'ki trainer', 'dozent', 'weiterbildung',
 ]);
 
-const ENGINEERING_QUALIFIERS = [
-  'engineer', 'engineering', 'researcher', 'research', 'architect',
-  'developer', 'scientist', 'lead', 'director', 'head',
-  'deployed', 'llmops', 'mlops', 'mts', 'member of technical staff',
-  'design engineer', 'machine learning', 'applied ai', 'swe',
+// Qualifiers required when a broad token (AI, ML, Agent, …) matched.
+// Head/lead/director alone do not qualify bare broad terms (e.g. "ML Head").
+const BROAD_TERM_QUALIFIERS = [
+  'engineer', 'engineering', 'researcher', 'research', 'architect', 'platform',
+  'developer', 'scientist', 'engineering manager', 'design engineer',
+  'machine learning', 'applied ai', 'swe', 'deployed', 'llmops', 'mlops',
+  'mts', 'member of technical staff',
 ];
+
+const SINGLE_TOKEN_BROAD = new Set([
+  'ai', 'ml', 'llm', 'agent', 'nlp', 'ki', 'speech',
+]);
+
+const AI_INTRINSIC_SINGLES = new Set([
+  'agentic', 'llmops', 'mlops', 'genai',
+]);
+
+const AI_COMPOUND_POSITIVE_RE = /\b(principal ai|staff ai|head of ai|director of ai|applied ai|ai platform|ai engineering|voice ai|conversational ai|generative ai|forward deployed|deployed engineer|ki engineer|machine learning)\b/i;
 
 const AI_DOMAIN_SIGNALS = [
   'ai', 'ml', 'llm', 'agentic', 'genai', 'generative ai', 'nlp',
@@ -146,8 +158,6 @@ const AI_DOMAIN_SIGNALS = [
   'forward deployed', 'forward-deployed', 'multimodal', 'speech',
   'ki engineer', 'künstliche intelligenz',
 ];
-
-const AI_SPECIFIC_POSITIVE_RE = /\b(ai|ml|llm|agentic|genai|nlp|llmops|mlops|speech|voice|conversational|generative|deployed|ki)\b|machine learning|applied ai|ai platform|forward deployed|forward-deployed/i;
 
 const IMPLICIT_NEGATIVE_PHRASES = [
   'account executive', 'strategic account', 'account manager', 'sales',
@@ -203,8 +213,8 @@ function titleHasImplicitNegative(lower) {
   return IMPLICIT_NEGATIVE_PHRASES.some((phrase) => titleContainsPhrase(lower, phrase));
 }
 
-function titleHasEngineeringQualifier(lower) {
-  return ENGINEERING_QUALIFIERS.some((q) => titleContainsPhrase(lower, q));
+function titleHasBroadTermQualifier(lower) {
+  return BROAD_TERM_QUALIFIERS.some((q) => titleContainsPhrase(lower, q));
 }
 
 function titleHasAiDomainSignal(lower) {
@@ -216,7 +226,11 @@ function isBroadPositive(keyword) {
 }
 
 function isAiSpecificPositive(keyword) {
-  return AI_SPECIFIC_POSITIVE_RE.test(keyword);
+  // Bare single-token broad keywords (AI, ML, Agent, …) always need a qualifier.
+  if (SINGLE_TOKEN_BROAD.has(keyword)) return false;
+  if (AI_INTRINSIC_SINGLES.has(keyword)) return true;
+  if (!keyword.includes(' ')) return false;
+  return AI_COMPOUND_POSITIVE_RE.test(keyword);
 }
 
 function extractTierASignals(profile) {
@@ -287,8 +301,7 @@ export function buildTitleFilter(titleFilter) {
 
     if (matched.some((k) => isAiSpecificPositive(k))) return true;
 
-    const broadMatched = matched.filter((k) => isBroadPositive(k));
-    if (broadMatched.length > 0 && titleHasEngineeringQualifier(lower)) return true;
+    if (matched.some((k) => isBroadPositive(k)) && titleHasBroadTermQualifier(lower)) return true;
 
     const genericMatched = matched.filter((k) => !isBroadPositive(k) && !isAiSpecificPositive(k));
     if (genericMatched.length > 0 && titleHasAiDomainSignal(lower)) return true;
