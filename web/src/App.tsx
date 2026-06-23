@@ -98,7 +98,7 @@ async function fetchViewData(view: AppView): Promise<{
       return result;
     }
     case 'inbox':
-      return {};
+      return { inbox: await fetchPipelineInbox() };
     default:
       return {};
   }
@@ -430,7 +430,9 @@ export default function App() {
         <ScanView
           history={scanHistory}
           loading={viewLoading}
-          onRefresh={refreshScan}
+          onRefresh={async () => {
+            await Promise.all([refreshScan(), refreshInbox(), refreshMatches()]);
+          }}
           onScanningChange={setScanning}
         />
       )}
