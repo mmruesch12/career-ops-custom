@@ -5,6 +5,7 @@ import yaml from 'js-yaml';
 import { deriveNoteFields } from './derive.mjs';
 import { acquireTrackerLock } from './tracker-lock.mjs';
 import { resolveCvAbsolutePath, resolveCvRelativePath, cvFileExists } from '../../cv-path.mjs';
+import { buildTitleFilter, classifyTitleTier } from '../../scan.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS_ROOT = resolve(__dirname, '../..');
@@ -864,7 +865,13 @@ export function computeMatches(careerOpsPath = CAREER_OPS_ROOT) {
 
   const cutoff = daysAgoIso(DISCOVERY_LOOKBACK_DAYS);
   const scan = loadScanHistory(careerOpsPath);
-  const recentDiscoveries = scan.entries
+  const portalsDoc = loadPortals(careerOpsPath);
+  const profileDoc = loadProfile(careerOpsPath);
+  const titleFilterConfig = portalsDoc.exists ? portalsDoc.parsed?.title_filter : null;
+  const titleFilter = titleFilterConfig ? buildTitleFilter(titleFilterConfig) : () => true;
+  const profile = profileDoc.profile?.parsed ?? null;
+
+  const baseDiscoveries = scan.entries
     .filter((entry) => entry.firstSeen && entry.firstSeen >= cutoff)
     .filter((entry) => {
       const normalized = normalizeMatchUrl(entry.url);
@@ -884,9 +891,22 @@ export function computeMatches(careerOpsPath = CAREER_OPS_ROOT) {
       status: entry.status,
     }));
 
+  const filteredDiscoveries = baseDiscoveries.filter((entry) => titleFilter(entry.title));
+
+  const tierADiscoveries = [];
+  const recentDiscoveries = [];
+  for (const entry of filteredDiscoveries) {
+    if (classifyTitleTier(entry.title, titleFilterConfig, profile) === 'A') {
+      tierADiscoveries.push(entry);
+    } else {
+      recentDiscoveries.push(entry);
+    }
+  }
+
   return {
     minScore,
     evaluatedMatches,
+    tierADiscoveries,
     recentDiscoveries,
     prerequisites: getEvaluatePrerequisites(careerOpsPath),
     generatedAt: new Date().toISOString(),

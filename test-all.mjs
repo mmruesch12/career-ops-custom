@@ -1257,6 +1257,8 @@ console.log('\n15. Location filter — always_allow tier');
 try {
   const {
     buildLocationFilter,
+    buildTitleFilter,
+    classifyTitleTier,
     buildContentFilter,
     shouldDedupScanHistoryRow,
     formatPipelineOffer,
@@ -1382,6 +1384,48 @@ try {
   // step rather than being silently dropped here.
   if (filter(42) === true) pass('non-string locations are passed through to downstream evaluation, not silently dropped');
   else fail('non-string locations should pass through');
+
+  const titleFilterCfg = {
+    positive: [
+      'Principal AI', 'Staff AI', 'Applied AI', 'Agentic', 'AI Platform',
+      'AI', 'ML', 'LLM', 'Agent', 'Forward Deployed', 'Platform Engineer',
+      'Solutions Architect', 'Solutions Engineer', 'Product Manager',
+    ],
+    negative: ['Junior', 'Intern'],
+    seniority_boost: ['Senior', 'Staff', 'Principal', 'Lead', 'Head', 'Director'],
+  };
+  const titleFilter = buildTitleFilter(titleFilterCfg);
+  const tierProfile = {
+    target_roles: {
+      primary: ['Principal AI Engineer', 'Staff AI Engineer', 'Head of Applied AI'],
+      archetypes: [
+        { name: 'Agentic AI Platform / SDLC Transformation', fit: 'primary' },
+        { name: 'AI Platform / LLMOps Engineer', fit: 'primary' },
+      ],
+    },
+  };
+
+  if (
+    titleFilter('Strategic Account Executive, AI Native') === false &&
+    titleFilter('AI Researcher') === true &&
+    titleFilter('Staff AI Engineer') === true &&
+    titleFilter('Partner Solutions Engineer') === false &&
+    titleFilter('Product Manager - Enterprise Agents') === false
+  ) {
+    pass('buildTitleFilter rejects sales/SA/PM noise and keeps engineering titles');
+  } else {
+    fail('buildTitleFilter obvious-case matrix failed');
+  }
+
+  if (
+    classifyTitleTier('Staff AI Engineer', titleFilterCfg, tierProfile) === 'A' &&
+    classifyTitleTier('Strategic Account Executive, AI Native', titleFilterCfg, tierProfile) === null &&
+    classifyTitleTier('Agent Engineer', titleFilterCfg, tierProfile) === 'A'
+  ) {
+    pass('classifyTitleTier returns A for primary/strong matches only');
+  } else {
+    fail('classifyTitleTier tier assignment failed');
+  }
 
   if (
     shouldDedupScanHistoryRow({ firstSeen: '2026-06-01', status: 'added' }, { recheckAfterDays: 30, today: '2026-06-10' }) === true &&
@@ -4026,11 +4070,12 @@ try {
   if (
     typeof matches.minScore === 'number'
     && Array.isArray(matches.evaluatedMatches)
+    && Array.isArray(matches.tierADiscoveries)
     && Array.isArray(matches.recentDiscoveries)
     && matches.prerequisites
     && typeof matches.prerequisites.canEvaluate === 'boolean'
   ) {
-    pass(`computeMatches() shape OK (minScore=${matches.minScore}, matches=${matches.evaluatedMatches.length})`);
+    pass(`computeMatches() shape OK (minScore=${matches.minScore}, matches=${matches.evaluatedMatches.length}, tierA=${matches.tierADiscoveries.length})`);
   } else {
     fail(`computeMatches() unexpected shape: ${JSON.stringify(matches)}`);
   }
@@ -4080,11 +4125,52 @@ try {
       fail(`computeMatches fixture evaluated filter wrong: ${JSON.stringify(companies)}`);
     }
 
-    const discoveryUrls = fixtureMatches.recentDiscoveries.map((d) => d.url);
+    const discoveryUrls = [
+      ...fixtureMatches.tierADiscoveries.map((d) => d.url),
+      ...fixtureMatches.recentDiscoveries.map((d) => d.url),
+    ];
     if (discoveryUrls.includes('https://jobs.example.com/newco-sre') && !discoveryUrls.some((u) => u.includes('acme') || u.includes('betaco'))) {
       pass('computeMatches fixture dedups discoveries by URL and company+role');
     } else {
       fail(`computeMatches fixture discoveries wrong: ${JSON.stringify(discoveryUrls)}`);
+    }
+
+    mkdirSync(join(fixtureRoot, 'config'));
+    writeFileSync(join(fixtureRoot, 'portals.yml'), `
+title_filter:
+  positive: ["AI", "Staff AI", "Applied AI", "Agent", "SRE"]
+  negative: ["Intern"]
+  seniority_boost: ["Senior", "Staff", "Principal"]
+`);
+    writeFileSync(join(fixtureRoot, 'config', 'profile.yml'), `
+target_roles:
+  primary:
+    - "Staff AI Engineer"
+    - "Applied AI Engineer"
+  archetypes:
+    - name: "AI Platform / LLMOps Engineer"
+      fit: primary
+`);
+    writeFileSync(join(fixtureRoot, 'data', 'scan-history.tsv'), [
+      'url\tfirstSeen\tportal\ttitle\tcompany\tstatus\tlocation',
+      'https://jobs.example.com/staff-ai\t2026-06-10\tgreenhouse\tStaff AI Engineer\tTierCo\t\tRemote',
+      'https://jobs.example.com/account-exec\t2026-06-10\tgreenhouse\tStrategic Account Executive, AI Native\tNoiseCo\t\tRemote',
+      'https://jobs.example.com/sre-only\t2026-06-11\tlever\tSRE\tNewCo\t\tRemote',
+    ].join('\n') + '\n');
+
+    const tierFixtureMatches = computeMatches(fixtureRoot);
+    const tierAUrls = tierFixtureMatches.tierADiscoveries.map((d) => d.url);
+    const recentUrls = tierFixtureMatches.recentDiscoveries.map((d) => d.url);
+    if (
+      tierAUrls.includes('https://jobs.example.com/staff-ai') &&
+      tierAUrls.length > 0 &&
+      !recentUrls.includes('https://jobs.example.com/account-exec') &&
+      !tierAUrls.includes('https://jobs.example.com/account-exec') &&
+      recentUrls.includes('https://jobs.example.com/sre-only')
+    ) {
+      pass('computeMatches fixture splits Tier A, prunes account-exec noise');
+    } else {
+      fail(`computeMatches tier fixture wrong: tierA=${JSON.stringify(tierAUrls)} recent=${JSON.stringify(recentUrls)}`);
     }
 
     writeFileSync(join(fixtureRoot, 'data', 'cv.md'), '# Test CV\n\n### Acme Corp\nBuilt ML pipelines with Python and Kubernetes.\n');

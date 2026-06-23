@@ -41,7 +41,9 @@ export function MatchesView({ data, loading, error, onRefresh, disabled = false 
 
   useEffect(() => {
     const discoveryUrls = new Set(
-      (data?.recentDiscoveries ?? []).map((d) => d.url).filter(Boolean),
+      [...(data?.tierADiscoveries ?? []), ...(data?.recentDiscoveries ?? [])]
+        .map((d) => d.url)
+        .filter(Boolean),
     );
     setEvalStates((prev) => {
       const next: Record<string, EvalState> = {};
@@ -50,7 +52,7 @@ export function MatchesView({ data, loading, error, onRefresh, disabled = false 
       }
       return Object.keys(next).length === Object.keys(prev).length ? prev : next;
     });
-  }, [data?.generatedAt, data?.recentDiscoveries]);
+  }, [data?.generatedAt, data?.tierADiscoveries, data?.recentDiscoveries]);
 
   const matches = localMatches ?? data?.evaluatedMatches ?? [];
 
@@ -257,6 +259,41 @@ export function MatchesView({ data, loading, error, onRefresh, disabled = false 
                 genState={genStates[match.reportNumber] || { status: 'idle' }}
                 canGenerate={canGenerate}
                 onGenerate={() => handleGenerate(match)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Target className="h-4 w-4 text-green" />
+          <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-subtle">
+            Tier A (deterministic filters)
+          </h3>
+          <span className="rounded-full bg-green/10 px-2 py-0.5 text-xs text-green">
+            {data.tierADiscoveries.length}
+          </span>
+          <span className="text-xs text-muted">primary targets · not yet evaluated</span>
+        </div>
+
+        {data.tierADiscoveries.length === 0 ? (
+          <div className="glass-panel py-10 text-center">
+            <p className="text-sm text-subtle">No Tier A discoveries right now</p>
+            <p className="mt-1 text-xs text-muted">
+              Roles matching your primary targets and senior AI signals appear here after a scan
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {data.tierADiscoveries.map((discovery, index) => (
+              <DiscoveryCard
+                key={discovery.url || `tier-a-${index}`}
+                discovery={discovery}
+                evalState={evalStates[discovery.url] || { status: 'idle' }}
+                canEvaluate={canEvaluate}
+                disabled={disabled}
+                onEvaluate={() => handleEvaluate(discovery)}
               />
             ))}
           </div>

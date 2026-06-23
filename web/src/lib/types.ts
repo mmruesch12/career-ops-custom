@@ -268,6 +268,7 @@ export interface ResumePrerequisites {
 export interface MatchData {
   minScore: number;
   evaluatedMatches: EvaluatedMatch[];
+  tierADiscoveries: RecentDiscovery[];
   recentDiscoveries: RecentDiscovery[];
   prerequisites: ResumePrerequisites;
   generatedAt: string;
