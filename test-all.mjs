@@ -1259,6 +1259,7 @@ try {
     buildLocationFilter,
     buildTitleFilter,
     classifyTitleTier,
+    titleContainsPhrase,
     buildContentFilter,
     shouldDedupScanHistoryRow,
     formatPipelineOffer,
@@ -1418,9 +1419,27 @@ try {
   }
 
   if (
+    !titleContainsPhrase('Senior Failure Engineer', 'ai') &&
+    !titleContainsPhrase('Email Platform Engineer', 'ai') &&
+    !titleContainsPhrase('waitlist coordinator', 'ai') &&
+    titleContainsPhrase('Staff AI Engineer', 'ai') &&
+    titleFilter('Senior Failure Engineer') === false &&
+    titleFilter('Email Platform Engineer') === false &&
+    titleFilter('Staff Engineer, Datacenter Server Lifecycle') === false &&
+    titleFilter('Principal Engineer, Streaming Systems') === false
+  ) {
+    pass('buildTitleFilter blocks substring false-positives and generic eng without AI');
+  } else {
+    fail('buildTitleFilter substring/generic-engineering leak matrix failed');
+  }
+
+  if (
     classifyTitleTier('Staff AI Engineer', titleFilterCfg, tierProfile) === 'A' &&
     classifyTitleTier('Strategic Account Executive, AI Native', titleFilterCfg, tierProfile) === null &&
-    classifyTitleTier('Agent Engineer', titleFilterCfg, tierProfile) === 'A'
+    classifyTitleTier('Agent Engineer', titleFilterCfg, tierProfile) === 'A' &&
+    classifyTitleTier('Senior Failure Engineer', titleFilterCfg, tierProfile) === null &&
+    classifyTitleTier('Email Platform Engineer', titleFilterCfg, tierProfile) === null &&
+    classifyTitleTier('Staff Engineer, Datacenter Server Lifecycle', titleFilterCfg, tierProfile) === null
   ) {
     pass('classifyTitleTier returns A for primary/strong matches only');
   } else {
@@ -4155,20 +4174,24 @@ target_roles:
       'url\tfirstSeen\tportal\ttitle\tcompany\tstatus\tlocation',
       'https://jobs.example.com/staff-ai\t2026-06-10\tgreenhouse\tStaff AI Engineer\tTierCo\t\tRemote',
       'https://jobs.example.com/account-exec\t2026-06-10\tgreenhouse\tStrategic Account Executive, AI Native\tNoiseCo\t\tRemote',
-      'https://jobs.example.com/sre-only\t2026-06-11\tlever\tSRE\tNewCo\t\tRemote',
+      'https://jobs.example.com/ai-researcher\t2026-06-11\tlever\tAI Researcher\tResearchCo\t\tRemote',
+      'https://jobs.example.com/datacenter\t2026-06-11\tlever\tStaff Engineer, Datacenter Server Lifecycle\tInfraCo\t\tRemote',
+      'https://jobs.example.com/failure-eng\t2026-06-11\tlever\tSenior Failure Engineer\tOpsCo\t\tRemote',
     ].join('\n') + '\n');
 
     const tierFixtureMatches = computeMatches(fixtureRoot);
     const tierAUrls = tierFixtureMatches.tierADiscoveries.map((d) => d.url);
     const recentUrls = tierFixtureMatches.recentDiscoveries.map((d) => d.url);
+    const allUrls = [...tierAUrls, ...recentUrls];
     if (
       tierAUrls.includes('https://jobs.example.com/staff-ai') &&
-      tierAUrls.length > 0 &&
-      !recentUrls.includes('https://jobs.example.com/account-exec') &&
-      !tierAUrls.includes('https://jobs.example.com/account-exec') &&
-      recentUrls.includes('https://jobs.example.com/sre-only')
+      tierAUrls.length === 1 &&
+      recentUrls.includes('https://jobs.example.com/ai-researcher') &&
+      !allUrls.includes('https://jobs.example.com/account-exec') &&
+      !allUrls.includes('https://jobs.example.com/datacenter') &&
+      !allUrls.includes('https://jobs.example.com/failure-eng')
     ) {
-      pass('computeMatches fixture splits Tier A, prunes account-exec noise');
+      pass('computeMatches fixture splits Tier A, prunes account-exec and generic-eng noise');
     } else {
       fail(`computeMatches tier fixture wrong: tierA=${JSON.stringify(tierAUrls)} recent=${JSON.stringify(recentUrls)}`);
     }

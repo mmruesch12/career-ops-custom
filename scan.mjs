@@ -120,8 +120,9 @@ function resolveProvider(entry, providers, { skipIds = [] } = {}) {
 }
 
 // ── Title filter ────────────────────────────────────────────────────
-// Broad positives (AI, ML, Agent, …) require an engineering/research qualifier.
-// Implicit negatives catch sales/GTM/SA/PM noise even when a broad positive matches.
+// Short tokens (AI, ML, Agent, …) use word boundaries to avoid substring
+// false-positives (failure, email, waitlist). Generic narrow positives
+// (Staff/Principal/Platform Engineer) require an AI-domain signal.
 
 const BROAD_POSITIVE_TERMS = new Set([
   'ai', 'ml', 'llm', 'agent', 'nlp', 'ki', 'speech', 'automation',
@@ -132,11 +133,21 @@ const BROAD_POSITIVE_TERMS = new Set([
 ]);
 
 const ENGINEERING_QUALIFIERS = [
-  'engineer', 'engineering', 'researcher', 'research', 'architect', 'platform',
-  'developer', 'scientist', 'lead', 'director', 'head', 'staff', 'principal',
+  'engineer', 'engineering', 'researcher', 'research', 'architect',
+  'developer', 'scientist', 'lead', 'director', 'head',
   'deployed', 'llmops', 'mlops', 'mts', 'member of technical staff',
   'design engineer', 'machine learning', 'applied ai', 'swe',
 ];
+
+const AI_DOMAIN_SIGNALS = [
+  'ai', 'ml', 'llm', 'agentic', 'genai', 'generative ai', 'nlp',
+  'machine learning', 'applied ai', 'ai platform', 'llmops', 'mlops',
+  'voice ai', 'conversational ai', 'agent engineer', 'agent design',
+  'forward deployed', 'forward-deployed', 'multimodal', 'speech',
+  'ki engineer', 'künstliche intelligenz',
+];
+
+const AI_SPECIFIC_POSITIVE_RE = /\b(ai|ml|llm|agentic|genai|nlp|llmops|mlops|speech|voice|conversational|generative|deployed|ki)\b|machine learning|applied ai|ai platform|forward deployed|forward-deployed/i;
 
 const IMPLICIT_NEGATIVE_PHRASES = [
   'account executive', 'strategic account', 'account manager', 'sales',
@@ -155,7 +166,13 @@ const STRONG_TIER_A_PATTERNS = [
   'agent engineer', 'agent design engineer', 'forward deployed ai',
   'forward deployed engineer', 'forward-deployed', 'ai platform',
   'llmops', 'mlops', 'ai research engineer', 'staff ai research',
-  'senior agent design', 'member of technical staff',
+  'senior agent design',
+];
+
+const TIER_A_ARCHETYPE_SIGNALS = [
+  'applied ai', 'agentic', 'ai platform', 'llmops', 'mlops',
+  'agent engineer', 'forward deployed', 'genai', 'generative ai',
+  'machine learning', 'ai research', 'agent design', 'voice ai',
 ];
 
 function normalizeTitleKeywords(value) {
@@ -167,46 +184,65 @@ function normalizeTitleKeywords(value) {
     .filter(Boolean);
 }
 
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Word-boundary phrase match — prevents 'ai' matching failure/email/waitlist. */
+export function titleContainsPhrase(title, phrase) {
+  if (typeof title !== 'string' || typeof phrase !== 'string') return false;
+  const lower = title.toLowerCase();
+  const p = phrase.toLowerCase().trim();
+  if (!p) return false;
+  const pattern = p.split(/\s+/).map(escapeRegex).join('\\s+');
+  const re = new RegExp(`(?:^|[^a-z0-9])${pattern}(?:[^a-z0-9]|$)`, 'i');
+  return re.test(lower);
+}
+
 function titleHasImplicitNegative(lower) {
-  return IMPLICIT_NEGATIVE_PHRASES.some((phrase) => lower.includes(phrase));
+  return IMPLICIT_NEGATIVE_PHRASES.some((phrase) => titleContainsPhrase(lower, phrase));
 }
 
 function titleHasEngineeringQualifier(lower) {
-  return ENGINEERING_QUALIFIERS.some((q) => lower.includes(q));
+  return ENGINEERING_QUALIFIERS.some((q) => titleContainsPhrase(lower, q));
+}
+
+function titleHasAiDomainSignal(lower) {
+  return AI_DOMAIN_SIGNALS.some((s) => titleContainsPhrase(lower, s));
 }
 
 function isBroadPositive(keyword) {
   return BROAD_POSITIVE_TERMS.has(keyword);
 }
 
+function isAiSpecificPositive(keyword) {
+  return AI_SPECIFIC_POSITIVE_RE.test(keyword);
+}
+
 function extractTierASignals(profile) {
-  const signals = new Set([
-    'applied ai', 'agentic', 'ai platform', 'llmops', 'mlops', 'agent',
-    'llm', 'forward deployed', 'platform', 'agent engineer', 'genai',
-  ]);
+  const signals = new Set(TIER_A_ARCHETYPE_SIGNALS);
   const archetypes = profile?.target_roles?.archetypes || [];
   for (const arch of archetypes) {
     if (arch?.fit !== 'primary' || !arch?.name) continue;
     const name = String(arch.name).toLowerCase();
-    if (name.includes('agentic')) signals.add('agentic');
-    if (name.includes('platform')) signals.add('platform');
-    if (name.includes('llmops') || name.includes('llm ops')) signals.add('llmops');
-    if (name.includes('mlops') || name.includes('ml ops')) signals.add('mlops');
-    if (name.includes('agent')) signals.add('agent');
-    if (name.includes('applied')) signals.add('applied ai');
-    if (name.includes('ai')) signals.add('ai');
+    if (titleContainsPhrase(name, 'agentic')) signals.add('agentic');
+    if (titleContainsPhrase(name, 'llmops') || titleContainsPhrase(name, 'llm ops')) signals.add('llmops');
+    if (titleContainsPhrase(name, 'mlops') || titleContainsPhrase(name, 'ml ops')) signals.add('mlops');
+    if (titleContainsPhrase(name, 'agent')) signals.add('agent engineer');
+    if (titleContainsPhrase(name, 'applied')) signals.add('applied ai');
+    if (titleContainsPhrase(name, 'ai platform')) signals.add('ai platform');
   }
   return [...signals];
 }
 
 function titleHasSeniority(lower, titleFilterConfig) {
   const boost = normalizeTitleKeywords(titleFilterConfig?.seniority_boost);
-  if (boost.some((s) => lower.includes(s))) return true;
+  if (boost.some((s) => titleContainsPhrase(lower, s))) return true;
   return /\b(senior|staff|principal|lead|head|director)\b/.test(lower);
 }
 
 function titleHasTierASignal(lower, profile) {
-  return extractTierASignals(profile).some((s) => lower.includes(s));
+  return extractTierASignals(profile).some((s) => titleContainsPhrase(lower, s));
 }
 
 /**
@@ -220,18 +256,14 @@ export function classifyTitleTier(title, titleFilterConfig, profile) {
 
   const primary = profile?.target_roles?.primary || [];
   for (const phrase of primary) {
-    if (typeof phrase === 'string' && phrase.trim() && lower.includes(phrase.toLowerCase())) {
+    if (typeof phrase === 'string' && phrase.trim() && titleContainsPhrase(lower, phrase)) {
       return 'A';
     }
   }
 
-  if (STRONG_TIER_A_PATTERNS.some((p) => lower.includes(p))) return 'A';
+  if (STRONG_TIER_A_PATTERNS.some((p) => titleContainsPhrase(lower, p))) return 'A';
 
   if (titleHasSeniority(lower, titleFilterConfig) && titleHasTierASignal(lower, profile)) {
-    return 'A';
-  }
-
-  if (titleHasTierASignal(lower, profile) && titleHasEngineeringQualifier(lower)) {
     return 'A';
   }
 
@@ -247,16 +279,21 @@ export function buildTitleFilter(titleFilter) {
     const lower = title.toLowerCase();
 
     if (titleHasImplicitNegative(lower)) return false;
-    if (negative.some((k) => lower.includes(k))) return false;
+    if (negative.some((k) => titleContainsPhrase(lower, k))) return false;
     if (positive.length === 0) return true;
 
-    const matched = positive.filter((k) => lower.includes(k));
+    const matched = positive.filter((k) => titleContainsPhrase(lower, k));
     if (matched.length === 0) return false;
 
-    const hasNarrow = matched.some((k) => !isBroadPositive(k));
-    if (hasNarrow) return true;
+    if (matched.some((k) => isAiSpecificPositive(k))) return true;
 
-    return titleHasEngineeringQualifier(lower);
+    const broadMatched = matched.filter((k) => isBroadPositive(k));
+    if (broadMatched.length > 0 && titleHasEngineeringQualifier(lower)) return true;
+
+    const genericMatched = matched.filter((k) => !isBroadPositive(k) && !isAiSpecificPositive(k));
+    if (genericMatched.length > 0 && titleHasAiDomainSignal(lower)) return true;
+
+    return false;
   };
 }
 
