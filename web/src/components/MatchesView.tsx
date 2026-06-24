@@ -348,7 +348,7 @@ export function MatchesView({ data, loading, error, onRefresh, disabled = false 
           <span className="rounded-full bg-sky/10 px-2 py-0.5 text-xs text-sky">
             {data.recentDiscoveries.length}
           </span>
-          <span className="text-xs text-muted">last 14 days · not yet evaluated</span>
+          <span className="text-xs text-muted">other filtered roles · last 14 days</span>
         </div>
 
         {data.recentDiscoveries.length === 0 ? (

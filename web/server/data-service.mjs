@@ -5,7 +5,7 @@ import yaml from 'js-yaml';
 import { deriveNoteFields } from './derive.mjs';
 import { acquireTrackerLock } from './tracker-lock.mjs';
 import { resolveCvAbsolutePath, resolveCvRelativePath, cvFileExists } from '../../cv-path.mjs';
-import { buildTitleFilter, classifyTitleTier } from '../../scan.mjs';
+import { buildTitleFilter, classifyTitleTier } from '../../scan-title-filter.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS_ROOT = resolve(__dirname, '../..');
@@ -907,12 +907,18 @@ export function computeMatches(careerOpsPath = CAREER_OPS_ROOT) {
     }
   }
 
+  const sortDiscoveries = (entries) => [...entries].sort((a, b) => {
+    const byDate = (b.firstSeen || '').localeCompare(a.firstSeen || '');
+    if (byDate !== 0) return byDate;
+    return (a.company || '').localeCompare(b.company || '');
+  });
+
   return {
     minScore,
     evaluatedMatches,
-    tierADiscoveries,
-    tierBDiscoveries,
-    recentDiscoveries,
+    tierADiscoveries: sortDiscoveries(tierADiscoveries),
+    tierBDiscoveries: sortDiscoveries(tierBDiscoveries),
+    recentDiscoveries: sortDiscoveries(recentDiscoveries),
     prerequisites: getEvaluatePrerequisites(careerOpsPath),
     generatedAt: new Date().toISOString(),
   };

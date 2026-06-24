@@ -1450,6 +1450,7 @@ try {
 
   if (
     classifyTitleTier('Staff AI Engineer', titleFilterCfg, tierProfile) === 'A' &&
+    classifyTitleTier('Principal AI Engineer', titleFilterCfg, tierProfile) === 'A' &&
     classifyTitleTier('Strategic Account Executive, AI Native', titleFilterCfg, tierProfile) === null &&
     classifyTitleTier('Agent Engineer', titleFilterCfg, tierProfile) === 'A' &&
     classifyTitleTier('Senior Failure Engineer', titleFilterCfg, tierProfile) === null &&
@@ -1457,7 +1458,9 @@ try {
     classifyTitleTier('Staff Engineer, Datacenter Server Lifecycle', titleFilterCfg, tierProfile) === null &&
     classifyTitleTier('AI Manager', titleFilterCfg, tierProfile) === 'B' &&
     classifyTitleTier('Engineering Manager, Agent Prompts', titleFilterCfg, tierProfile) === 'B' &&
-    classifyTitleTier('Head of Applied AI', titleFilterCfg, tierProfile) === 'B'
+    classifyTitleTier('Head of Applied AI', titleFilterCfg, tierProfile) === 'B' &&
+    classifyTitleTier('Director of AI Engineering', titleFilterCfg, tierProfile) === 'B' &&
+    classifyTitleTier('VP of Applied AI', titleFilterCfg, tierProfile) === 'B'
   ) {
     pass('classifyTitleTier returns A for IC matches and B for leadership roles');
   } else {
