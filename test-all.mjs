@@ -1435,14 +1435,15 @@ try {
 
   if (
     titleFilter('AI') === false &&
-    titleFilter('AI Manager') === false &&
-    titleFilter('ML Head') === false &&
+    titleFilter('AI Manager') === true &&
+    titleFilter('ML Head') === true &&
     titleFilter('AI Coordinator') === false &&
     titleFilter('AI Foo Bar') === false &&
     titleFilter('AI Researcher') === true &&
-    titleFilter('AI Platform Engineer') === true
+    titleFilter('AI Platform Engineer') === true &&
+    titleFilter('Engineering Manager, Agent Prompts') === true
   ) {
-    pass('buildTitleFilter rejects bare broad AI/ML titles lacking eng/platform/researcher qualifiers');
+    pass('buildTitleFilter rejects bare broad AI/ML titles but keeps leadership qualifiers');
   } else {
     fail('buildTitleFilter bare-broad AI/ML matrix failed');
   }
@@ -1453,9 +1454,12 @@ try {
     classifyTitleTier('Agent Engineer', titleFilterCfg, tierProfile) === 'A' &&
     classifyTitleTier('Senior Failure Engineer', titleFilterCfg, tierProfile) === null &&
     classifyTitleTier('Email Platform Engineer', titleFilterCfg, tierProfile) === null &&
-    classifyTitleTier('Staff Engineer, Datacenter Server Lifecycle', titleFilterCfg, tierProfile) === null
+    classifyTitleTier('Staff Engineer, Datacenter Server Lifecycle', titleFilterCfg, tierProfile) === null &&
+    classifyTitleTier('AI Manager', titleFilterCfg, tierProfile) === 'B' &&
+    classifyTitleTier('Engineering Manager, Agent Prompts', titleFilterCfg, tierProfile) === 'B' &&
+    classifyTitleTier('Head of Applied AI', titleFilterCfg, tierProfile) === 'B'
   ) {
-    pass('classifyTitleTier returns A for primary/strong matches only');
+    pass('classifyTitleTier returns A for IC matches and B for leadership roles');
   } else {
     fail('classifyTitleTier tier assignment failed');
   }
@@ -4104,11 +4108,12 @@ try {
     typeof matches.minScore === 'number'
     && Array.isArray(matches.evaluatedMatches)
     && Array.isArray(matches.tierADiscoveries)
+    && Array.isArray(matches.tierBDiscoveries)
     && Array.isArray(matches.recentDiscoveries)
     && matches.prerequisites
     && typeof matches.prerequisites.canEvaluate === 'boolean'
   ) {
-    pass(`computeMatches() shape OK (minScore=${matches.minScore}, matches=${matches.evaluatedMatches.length}, tierA=${matches.tierADiscoveries.length})`);
+    pass(`computeMatches() shape OK (minScore=${matches.minScore}, matches=${matches.evaluatedMatches.length}, tierA=${matches.tierADiscoveries.length}, tierB=${matches.tierBDiscoveries.length})`);
   } else {
     fail(`computeMatches() unexpected shape: ${JSON.stringify(matches)}`);
   }
@@ -4160,6 +4165,7 @@ try {
 
     const discoveryUrls = [
       ...fixtureMatches.tierADiscoveries.map((d) => d.url),
+      ...fixtureMatches.tierBDiscoveries.map((d) => d.url),
       ...fixtureMatches.recentDiscoveries.map((d) => d.url),
     ];
     if (discoveryUrls.includes('https://jobs.example.com/newco-sre') && !discoveryUrls.some((u) => u.includes('acme') || u.includes('betaco'))) {
@@ -4189,25 +4195,28 @@ target_roles:
       'https://jobs.example.com/staff-ai\t2026-06-10\tgreenhouse\tStaff AI Engineer\tTierCo\t\tRemote',
       'https://jobs.example.com/account-exec\t2026-06-10\tgreenhouse\tStrategic Account Executive, AI Native\tNoiseCo\t\tRemote',
       'https://jobs.example.com/ai-researcher\t2026-06-11\tlever\tAI Researcher\tResearchCo\t\tRemote',
+      'https://jobs.example.com/eng-manager\t2026-06-11\tgreenhouse\tEngineering Manager, Agent Prompts\tLeadCo\t\tRemote',
       'https://jobs.example.com/datacenter\t2026-06-11\tlever\tStaff Engineer, Datacenter Server Lifecycle\tInfraCo\t\tRemote',
       'https://jobs.example.com/failure-eng\t2026-06-11\tlever\tSenior Failure Engineer\tOpsCo\t\tRemote',
     ].join('\n') + '\n');
 
     const tierFixtureMatches = computeMatches(fixtureRoot);
     const tierAUrls = tierFixtureMatches.tierADiscoveries.map((d) => d.url);
+    const tierBUrls = tierFixtureMatches.tierBDiscoveries.map((d) => d.url);
     const recentUrls = tierFixtureMatches.recentDiscoveries.map((d) => d.url);
-    const allUrls = [...tierAUrls, ...recentUrls];
+    const allUrls = [...tierAUrls, ...tierBUrls, ...recentUrls];
     if (
       tierAUrls.includes('https://jobs.example.com/staff-ai') &&
       tierAUrls.length === 1 &&
+      tierBUrls.includes('https://jobs.example.com/eng-manager') &&
       recentUrls.includes('https://jobs.example.com/ai-researcher') &&
       !allUrls.includes('https://jobs.example.com/account-exec') &&
       !allUrls.includes('https://jobs.example.com/datacenter') &&
       !allUrls.includes('https://jobs.example.com/failure-eng')
     ) {
-      pass('computeMatches fixture splits Tier A, prunes account-exec and generic-eng noise');
+      pass('computeMatches fixture splits Tier A/B, prunes account-exec and generic-eng noise');
     } else {
-      fail(`computeMatches tier fixture wrong: tierA=${JSON.stringify(tierAUrls)} recent=${JSON.stringify(recentUrls)}`);
+      fail(`computeMatches tier fixture wrong: tierA=${JSON.stringify(tierAUrls)} tierB=${JSON.stringify(tierBUrls)} recent=${JSON.stringify(recentUrls)}`);
     }
 
     writeFileSync(join(fixtureRoot, 'data', 'cv.md'), '# Test CV\n\n### Acme Corp\nBuilt ML pipelines with Python and Kubernetes.\n');

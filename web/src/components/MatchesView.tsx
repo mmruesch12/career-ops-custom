@@ -41,7 +41,11 @@ export function MatchesView({ data, loading, error, onRefresh, disabled = false 
 
   useEffect(() => {
     const discoveryUrls = new Set(
-      [...(data?.tierADiscoveries ?? []), ...(data?.recentDiscoveries ?? [])]
+      [
+        ...(data?.tierADiscoveries ?? []),
+        ...(data?.tierBDiscoveries ?? []),
+        ...(data?.recentDiscoveries ?? []),
+      ]
         .map((d) => d.url)
         .filter(Boolean),
     );
@@ -52,7 +56,7 @@ export function MatchesView({ data, loading, error, onRefresh, disabled = false 
       }
       return Object.keys(next).length === Object.keys(prev).length ? prev : next;
     });
-  }, [data?.generatedAt, data?.tierADiscoveries, data?.recentDiscoveries]);
+  }, [data?.generatedAt, data?.tierADiscoveries, data?.tierBDiscoveries, data?.recentDiscoveries]);
 
   const matches = localMatches ?? data?.evaluatedMatches ?? [];
 
@@ -289,6 +293,41 @@ export function MatchesView({ data, loading, error, onRefresh, disabled = false 
             {data.tierADiscoveries.map((discovery, index) => (
               <DiscoveryCard
                 key={discovery.url || `tier-a-${index}`}
+                discovery={discovery}
+                evalState={evalStates[discovery.url] || { status: 'idle' }}
+                canEvaluate={canEvaluate}
+                disabled={disabled}
+                onEvaluate={() => handleEvaluate(discovery)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Target className="h-4 w-4 text-mauve" />
+          <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-subtle">
+            Tier B (manager / director)
+          </h3>
+          <span className="rounded-full bg-mauve/10 px-2 py-0.5 text-xs text-mauve">
+            {data.tierBDiscoveries.length}
+          </span>
+          <span className="text-xs text-muted">leadership roles · not yet evaluated</span>
+        </div>
+
+        {data.tierBDiscoveries.length === 0 ? (
+          <div className="glass-panel py-10 text-center">
+            <p className="text-sm text-subtle">No Tier B leadership discoveries right now</p>
+            <p className="mt-1 text-xs text-muted">
+              Manager, director, and head-of-AI roles with AI relevance appear here
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {data.tierBDiscoveries.map((discovery, index) => (
+              <DiscoveryCard
+                key={discovery.url || `tier-b-${index}`}
                 discovery={discovery}
                 evalState={evalStates[discovery.url] || { status: 'idle' }}
                 canEvaluate={canEvaluate}

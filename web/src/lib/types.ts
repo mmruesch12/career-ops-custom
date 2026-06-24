@@ -269,6 +269,7 @@ export interface MatchData {
   minScore: number;
   evaluatedMatches: EvaluatedMatch[];
   tierADiscoveries: RecentDiscovery[];
+  tierBDiscoveries: RecentDiscovery[];
   recentDiscoveries: RecentDiscovery[];
   prerequisites: ResumePrerequisites;
   generatedAt: string;

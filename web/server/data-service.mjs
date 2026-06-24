@@ -894,10 +894,14 @@ export function computeMatches(careerOpsPath = CAREER_OPS_ROOT) {
   const filteredDiscoveries = baseDiscoveries.filter((entry) => titleFilter(entry.title));
 
   const tierADiscoveries = [];
+  const tierBDiscoveries = [];
   const recentDiscoveries = [];
   for (const entry of filteredDiscoveries) {
-    if (classifyTitleTier(entry.title, titleFilterConfig, profile) === 'A') {
+    const tier = classifyTitleTier(entry.title, titleFilterConfig, profile);
+    if (tier === 'A') {
       tierADiscoveries.push(entry);
+    } else if (tier === 'B') {
+      tierBDiscoveries.push(entry);
     } else {
       recentDiscoveries.push(entry);
     }
@@ -907,6 +911,7 @@ export function computeMatches(careerOpsPath = CAREER_OPS_ROOT) {
     minScore,
     evaluatedMatches,
     tierADiscoveries,
+    tierBDiscoveries,
     recentDiscoveries,
     prerequisites: getEvaluatePrerequisites(careerOpsPath),
     generatedAt: new Date().toISOString(),

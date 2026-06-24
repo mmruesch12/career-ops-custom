@@ -133,12 +133,12 @@ const BROAD_POSITIVE_TERMS = new Set([
 ]);
 
 // Qualifiers required when a broad token (AI, ML, Agent, …) matched.
-// Head/lead/director alone do not qualify bare broad terms (e.g. "ML Head").
+// Includes leadership titles (manager/director/head) — those route to Tier B.
 const BROAD_TERM_QUALIFIERS = [
   'engineer', 'engineering', 'researcher', 'research', 'architect', 'platform',
   'developer', 'scientist', 'engineering manager', 'design engineer',
   'machine learning', 'applied ai', 'swe', 'deployed', 'llmops', 'mlops',
-  'mts', 'member of technical staff',
+  'mts', 'member of technical staff', 'manager', 'director', 'head',
 ];
 
 const SINGLE_TOKEN_BROAD = new Set([
@@ -152,7 +152,7 @@ const AI_INTRINSIC_SINGLES = new Set([
 const AI_COMPOUND_POSITIVE_RE = /\b(principal ai|staff ai|head of ai|director of ai|applied ai|ai platform|ai engineering|voice ai|conversational ai|generative ai|forward deployed|deployed engineer|ki engineer|machine learning)\b/i;
 
 const AI_DOMAIN_SIGNALS = [
-  'ai', 'ml', 'llm', 'agentic', 'genai', 'generative ai', 'nlp',
+  'ai', 'ml', 'llm', 'agent', 'agentic', 'genai', 'generative ai', 'nlp',
   'machine learning', 'applied ai', 'ai platform', 'llmops', 'mlops',
   'voice ai', 'conversational ai', 'agent engineer', 'agent design',
   'forward deployed', 'forward-deployed', 'multimodal', 'speech',
@@ -171,8 +171,7 @@ const IMPLICIT_NEGATIVE_PHRASES = [
 ];
 
 const STRONG_TIER_A_PATTERNS = [
-  'principal ai', 'staff ai', 'head of ai', 'head of applied ai',
-  'director of ai', 'applied ai engineer', 'applied ai architect',
+  'principal ai', 'staff ai', 'applied ai engineer', 'applied ai architect',
   'agent engineer', 'agent design engineer', 'forward deployed ai',
   'forward deployed engineer', 'forward-deployed', 'ai platform',
   'llmops', 'mlops', 'ai research engineer', 'staff ai research',
@@ -259,10 +258,16 @@ function titleHasTierASignal(lower, profile) {
   return extractTierASignals(profile).some((s) => titleContainsPhrase(lower, s));
 }
 
+function isLeadershipTitle(lower) {
+  if (titleContainsPhrase(lower, 'engineering manager')) return true;
+  if (titleContainsPhrase(lower, 'senior manager')) return true;
+  return /\b(manager|director|head)\b/.test(lower);
+}
+
 /**
  * Classify a job title into a deterministic tier for matches curation.
- * Returns 'A' for direct primary-role matches, strong IC patterns, or
- * seniority + archetype/AI-platform signals. Otherwise null.
+ * Returns 'A' for IC/primary engineer matches, 'B' for manager/director/head
+ * roles with AI relevance, or null when unclassified.
  */
 export function classifyTitleTier(title, titleFilterConfig, profile) {
   if (typeof title !== 'string' || title.trim() === '') return null;
@@ -271,9 +276,11 @@ export function classifyTitleTier(title, titleFilterConfig, profile) {
   const primary = profile?.target_roles?.primary || [];
   for (const phrase of primary) {
     if (typeof phrase === 'string' && phrase.trim() && titleContainsPhrase(lower, phrase)) {
-      return 'A';
+      return isLeadershipTitle(lower) ? 'B' : 'A';
     }
   }
+
+  if (isLeadershipTitle(lower) && titleHasAiDomainSignal(lower)) return 'B';
 
   if (STRONG_TIER_A_PATTERNS.some((p) => titleContainsPhrase(lower, p))) return 'A';
 
