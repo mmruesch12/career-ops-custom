@@ -82,6 +82,9 @@ export function MatchesView({ data, loading, error, onRefresh, disabled = false 
 
   const canGenerate = data.prerequisites?.canGenerateResume ?? false;
   const canEvaluate = data.prerequisites?.canEvaluate ?? false;
+  const tierADiscoveries = data.tierADiscoveries ?? [];
+  const tierBDiscoveries = data.tierBDiscoveries ?? [];
+  const recentDiscoveries = data.recentDiscoveries ?? [];
 
   const handleGenerate = async (match: EvaluatedMatch) => {
     if (!match.reportNumber || inFlight.current.has(match.reportNumber)) return;
@@ -276,12 +279,12 @@ export function MatchesView({ data, loading, error, onRefresh, disabled = false 
             Tier A (deterministic filters)
           </h3>
           <span className="rounded-full bg-green/10 px-2 py-0.5 text-xs text-green">
-            {data.tierADiscoveries.length}
+            {tierADiscoveries.length}
           </span>
           <span className="text-xs text-muted">primary targets · not yet evaluated</span>
         </div>
 
-        {data.tierADiscoveries.length === 0 ? (
+        {tierADiscoveries.length === 0 ? (
           <div className="glass-panel py-10 text-center">
             <p className="text-sm text-subtle">No Tier A discoveries right now</p>
             <p className="mt-1 text-xs text-muted">
@@ -290,7 +293,7 @@ export function MatchesView({ data, loading, error, onRefresh, disabled = false 
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {data.tierADiscoveries.map((discovery, index) => (
+            {tierADiscoveries.map((discovery, index) => (
               <DiscoveryCard
                 key={discovery.url || `tier-a-${index}`}
                 discovery={discovery}
@@ -311,12 +314,12 @@ export function MatchesView({ data, loading, error, onRefresh, disabled = false 
             Tier B (manager / director)
           </h3>
           <span className="rounded-full bg-mauve/10 px-2 py-0.5 text-xs text-mauve">
-            {data.tierBDiscoveries.length}
+            {tierBDiscoveries.length}
           </span>
           <span className="text-xs text-muted">leadership roles · not yet evaluated</span>
         </div>
 
-        {data.tierBDiscoveries.length === 0 ? (
+        {tierBDiscoveries.length === 0 ? (
           <div className="glass-panel py-10 text-center">
             <p className="text-sm text-subtle">No Tier B leadership discoveries right now</p>
             <p className="mt-1 text-xs text-muted">
@@ -325,7 +328,7 @@ export function MatchesView({ data, loading, error, onRefresh, disabled = false 
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {data.tierBDiscoveries.map((discovery, index) => (
+            {tierBDiscoveries.map((discovery, index) => (
               <DiscoveryCard
                 key={discovery.url || `tier-b-${index}`}
                 discovery={discovery}
@@ -346,19 +349,19 @@ export function MatchesView({ data, loading, error, onRefresh, disabled = false 
             New discoveries
           </h3>
           <span className="rounded-full bg-sky/10 px-2 py-0.5 text-xs text-sky">
-            {data.recentDiscoveries.length}
+            {recentDiscoveries.length}
           </span>
           <span className="text-xs text-muted">other filtered roles · last 14 days</span>
         </div>
 
-        {data.recentDiscoveries.length === 0 ? (
+        {recentDiscoveries.length === 0 ? (
           <div className="glass-panel py-10 text-center">
             <p className="text-sm text-subtle">No new scan discoveries in the last two weeks</p>
             <p className="mt-1 text-xs text-muted">Run Scan to find fresh roles, then evaluate them here</p>
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {data.recentDiscoveries.map((discovery, index) => (
+            {recentDiscoveries.map((discovery, index) => (
               <DiscoveryCard
                 key={discovery.url || `discovery-${index}`}
                 discovery={discovery}
