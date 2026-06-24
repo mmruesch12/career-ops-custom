@@ -41,6 +41,7 @@ import {
   withTrackerScriptLock,
 } from './mutex.mjs';
 import { rejectPrivateOrInvalid } from '../../liveness-browser.mjs';
+import { isAllowedCorsOrigin } from './cors.mjs';
 
 const app = express();
 const PORT = process.env.PORT || 3847;
@@ -65,11 +66,7 @@ const ACTION_RATE_MAX = 10;
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || CORS_ORIGINS.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('CORS not allowed'));
-    }
+    callback(null, isAllowedCorsOrigin(origin, { corsOrigins: CORS_ORIGINS, host: HOST }));
   },
 }));
 app.use((req, res, next) => {

@@ -4083,6 +4083,24 @@ try {
     fail('web server missing matches/evaluate/cv/resume enhancements');
   }
 
+  const { isAllowedCorsOrigin } = await import(pathToFileURL(join(ROOT, 'web/server/cors.mjs')).href);
+  const corsOpts = {
+    corsOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    host: '127.0.0.1',
+  };
+  if (
+    isAllowedCorsOrigin(undefined, corsOpts) === true &&
+    isAllowedCorsOrigin('http://localhost:5173', corsOpts) === true &&
+    isAllowedCorsOrigin('http://localhost:5174', corsOpts) === true &&
+    isAllowedCorsOrigin('http://127.0.0.1:4173', corsOpts) === true &&
+    isAllowedCorsOrigin('null', corsOpts) === true &&
+    isAllowedCorsOrigin('https://evil.example', corsOpts) === false
+  ) {
+    pass('CORS allows localhost alternate ports on loopback bind');
+  } else {
+    fail('CORS localhost alternate-port policy failed');
+  }
+
   const mutexSrc = readFile('web/server/mutex.mjs');
   if (mutexSrc.includes('fileMutationInProgress = true') && !mutexSrc.includes('withScriptLock(() => withFileMutationLock')) {
     pass('withTrackerScriptLock acquires both locks without nested deadlock');
